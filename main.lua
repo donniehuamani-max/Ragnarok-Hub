@@ -59,6 +59,7 @@ local Config = {
     BlockPower = 1,
     AutoRotateEnabled = false,
     PowerfulServeEnabled = false,
+    EnableStatChangers = false,
 }
 
 local function SaveConfig()
@@ -470,6 +471,7 @@ local StatAttrNames = {
 local _attrConnections = {}
 
 local function ApplyStatFull(configKey, val)
+    if not Config.EnableStatChangers then return end
     local attrName = StatAttrNames[configKey]
     if not attrName then return end
     pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
@@ -483,7 +485,36 @@ local function ApplyStatFull(configKey, val)
     end
 end
 
+local function ResetAttributes()
+    for _, conn in pairs(_attrConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    _attrConnections = {}
+    for _, attrName in pairs(StatAttrNames) do
+        pcall(function() LocalPlayer:SetAttribute(attrName, 1) end)
+        local char = LocalPlayer.Character
+        if char then
+            pcall(function() char:SetAttribute(attrName, 1) end)
+        end
+    end
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChild("Humanoid")
+            if hum then
+                hum.JumpPower = 50
+                hum.JumpHeight = 7.2
+                hum.WalkSpeed = 16
+            end
+        end
+    end)
+end
+
 local function ApplyAllStats()
+    if not Config.EnableStatChangers then
+        ResetAttributes()
+        return
+    end
     for configKey, attrName in pairs(StatAttrNames) do
         local val = Config[configKey]
         if val and val ~= 1 then
@@ -522,12 +553,13 @@ local function HookAttributeEnforcement()
         pcall(function() conn:Disconnect() end)
     end
     _attrConnections = {}
+    if not Config.EnableStatChangers then return end
     for configKey, attrName in pairs(StatAttrNames) do
         local val = Config[configKey]
         if val and val ~= 1 then
             pcall(function()
                 local conn = LocalPlayer:GetAttributeChangedSignal(attrName):Connect(function()
-                    if not RAGNAROK_ALIVE then return end
+                    if not RAGNAROK_ALIVE or not Config.EnableStatChangers then return end
                     local current = LocalPlayer:GetAttribute(attrName)
                     if current ~= val then
                         pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
@@ -818,6 +850,14 @@ CreateCategory(MiscPage, "Visuals", "7733978098")
 CreateToggle(MiscPage, "Stretched Res", "StretchedRes")
 
 CreateCategory(ExperimentalsPage, "Stat Changers", "7733715400")
+CreateToggle(ExperimentalsPage, "Enable Stat Changers", "EnableStatChangers", function(state)
+    if state then
+        ApplyAllStats()
+        HookAttributeEnforcement()
+    else
+        ResetAttributes()
+    end
+end)
 
 CreateSlider(ExperimentalsPage, "Dive Speed", 0, 5, "DiveSpeed", function(val)
     ApplyStatFull("DiveSpeed", val)
