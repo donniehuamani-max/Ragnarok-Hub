@@ -469,9 +469,39 @@ local StatAttrNames = {
 }
 
 local _attrConnections = {}
+local _baseStats = {
+    PlayerAttributes = {},
+    CharAttributes = {},
+    CapturedChar = nil,
+    WalkSpeed = nil,
+    JumpPower = nil,
+    JumpHeight = nil,
+}
+
+local function CaptureBaseStats()
+    for _, attrName in pairs(StatAttrNames) do
+        if _baseStats.PlayerAttributes[attrName] == nil then
+            _baseStats.PlayerAttributes[attrName] = LocalPlayer:GetAttribute(attrName)
+        end
+    end
+    local char = LocalPlayer.Character
+    if char and _baseStats.CapturedChar ~= char then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then
+            _baseStats.WalkSpeed = hum.WalkSpeed
+            _baseStats.JumpPower = hum.JumpPower
+            _baseStats.JumpHeight = hum.JumpHeight
+            _baseStats.CapturedChar = char
+        end
+        for _, attrName in pairs(StatAttrNames) do
+            _baseStats.CharAttributes[attrName] = char:GetAttribute(attrName)
+        end
+    end
+end
 
 local function ApplyStatFull(configKey, val)
     if not Config.EnableStatChangers then return end
+    CaptureBaseStats()
     local attrName = StatAttrNames[configKey]
     if not attrName then return end
     pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
@@ -491,10 +521,16 @@ local function ResetAttributes()
     end
     _attrConnections = {}
     for _, attrName in pairs(StatAttrNames) do
-        pcall(function() LocalPlayer:SetAttribute(attrName, 1) end)
+        local origP = _baseStats.PlayerAttributes[attrName]
+        pcall(function() LocalPlayer:SetAttribute(attrName, origP) end)
         local char = LocalPlayer.Character
         if char then
-            pcall(function() char:SetAttribute(attrName, 1) end)
+            local origC = _baseStats.CharAttributes[attrName]
+            pcall(function() char:SetAttribute(attrName, origC) end)
+            local hum = char:FindFirstChild("Humanoid")
+            if hum then
+                pcall(function() hum:SetAttribute(attrName, origC) end)
+            end
         end
     end
     pcall(function()
@@ -502,9 +538,9 @@ local function ResetAttributes()
         if char then
             local hum = char:FindFirstChild("Humanoid")
             if hum then
-                hum.JumpPower = 50
-                hum.JumpHeight = 7.2
-                hum.WalkSpeed = 16
+                if _baseStats.JumpPower then hum.JumpPower = _baseStats.JumpPower end
+                if _baseStats.JumpHeight then hum.JumpHeight = _baseStats.JumpHeight end
+                if _baseStats.WalkSpeed then hum.WalkSpeed = _baseStats.WalkSpeed end
             end
         end
     end)
@@ -515,6 +551,7 @@ local function ApplyAllStats()
         ResetAttributes()
         return
     end
+    CaptureBaseStats()
     for configKey, attrName in pairs(StatAttrNames) do
         local val = Config[configKey]
         if val and val ~= 1 then
@@ -533,15 +570,18 @@ local function ApplyAllStats()
     if char then
         local hum = char:FindFirstChild("Humanoid")
         if hum then
+            local baseJP = _baseStats.JumpPower or 50
+            local baseJH = _baseStats.JumpHeight or 7.2
+            local baseWS = _baseStats.WalkSpeed or 16
             if Config.JumpPowerMult and Config.JumpPowerMult ~= 1 then
                 pcall(function()
-                    hum.JumpPower = 50 * Config.JumpPowerMult
-                    hum.JumpHeight = 7.2 * Config.JumpPowerMult
+                    hum.JumpPower = baseJP * Config.JumpPowerMult
+                    hum.JumpHeight = baseJH * Config.JumpPowerMult
                 end)
             end
             if Config.SpeedMult and Config.SpeedMult ~= 1 then
                 pcall(function()
-                    hum.WalkSpeed = 16 * Config.SpeedMult
+                    hum.WalkSpeed = baseWS * Config.SpeedMult
                 end)
             end
         end
@@ -1059,17 +1099,16 @@ end)
 
 LocalPlayer.CharacterAdded:Connect(function(char)
     if not RAGNAROK_ALIVE then return end
-    task.wait(0.5)
+    _baseStats.CapturedChar = nil
+    _baseStats.CharAttributes = {}
+    task.wait(0.2)
+    CaptureBaseStats()
     ApplyAllStats()
     HookAttributeEnforcement()
     if Config.AutoRotateEnabled then
         stopAutoRotateMonitor()
         startAutoRotateMonitor()
     end
-    task.wait(1)
-    ApplyAllStats()
-    task.wait(2)
-    ApplyAllStats()
 end)
 
 ApplyAllStats()
