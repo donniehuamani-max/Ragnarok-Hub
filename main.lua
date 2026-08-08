@@ -455,17 +455,112 @@ TContent.TextWrapped = true
 TContent.ZIndex = 5001
 TContent.Parent = TerminationMenu
 
+local StatAttrNames = {
+    DiveSpeed = "GameDiveSpeedMultiplier",
+    SpikePower = "GameSpikePowerMultiplier",
+    TiltPower = "GameTiltPowerMultiplier",
+    SpeedMult = "GameSpeedMultiplier",
+    SetPower = "GameSetPowerMultiplier",
+    ServePower = "GameServePowerMultiplier",
+    JumpPowerMult = "GameJumpPowerMultiplier",
+    BumpPower = "GameBumpPowerMultiplier",
+    BlockPower = "GameBlockPowerMultiplier",
+}
+
+local _attrConnections = {}
+
+local function ApplyStatFull(configKey, val)
+    local attrName = StatAttrNames[configKey]
+    if not attrName then return end
+    pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
+    local char = LocalPlayer.Character
+    if char then
+        pcall(function() char:SetAttribute(attrName, val) end)
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then
+            pcall(function() hum:SetAttribute(attrName, val) end)
+        end
+    end
+end
+
+local function ApplyAllStats()
+    for configKey, attrName in pairs(StatAttrNames) do
+        local val = Config[configKey]
+        if val and val ~= 1 then
+            pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
+            local char = LocalPlayer.Character
+            if char then
+                pcall(function() char:SetAttribute(attrName, val) end)
+                local hum = char:FindFirstChild("Humanoid")
+                if hum then
+                    pcall(function() hum:SetAttribute(attrName, val) end)
+                end
+            end
+        end
+    end
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then
+            if Config.JumpPowerMult and Config.JumpPowerMult ~= 1 then
+                pcall(function()
+                    hum.JumpPower = 50 * Config.JumpPowerMult
+                    hum.JumpHeight = 7.2 * Config.JumpPowerMult
+                end)
+            end
+            if Config.SpeedMult and Config.SpeedMult ~= 1 then
+                pcall(function()
+                    hum.WalkSpeed = 16 * Config.SpeedMult
+                end)
+            end
+        end
+    end
+end
+
+local function HookAttributeEnforcement()
+    for _, conn in pairs(_attrConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    _attrConnections = {}
+    for configKey, attrName in pairs(StatAttrNames) do
+        local val = Config[configKey]
+        if val and val ~= 1 then
+            pcall(function()
+                local conn = LocalPlayer:GetAttributeChangedSignal(attrName):Connect(function()
+                    if not RAGNAROK_ALIVE then return end
+                    local current = LocalPlayer:GetAttribute(attrName)
+                    if current ~= val then
+                        pcall(function() LocalPlayer:SetAttribute(attrName, val) end)
+                    end
+                end)
+                table.insert(_attrConnections, conn)
+            end)
+        end
+    end
+end
+
 local function ResetAttributes()
+    for _, conn in pairs(_attrConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    _attrConnections = {}
+    for _, attrName in pairs(StatAttrNames) do
+        pcall(function() LocalPlayer:SetAttribute(attrName, 1) end)
+        local char = LocalPlayer.Character
+        if char then
+            pcall(function() char:SetAttribute(attrName, 1) end)
+        end
+    end
     pcall(function()
-        LocalPlayer:SetAttribute("GameDiveSpeedMultiplier", 1)
-        LocalPlayer:SetAttribute("GameSpikePowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameTiltPowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameSpeedMultiplier", 1)
-        LocalPlayer:SetAttribute("GameSetPowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameServePowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameJumpPowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameBumpPowerMultiplier", 1)
-        LocalPlayer:SetAttribute("GameBlockPowerMultiplier", 1)
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChild("Humanoid")
+            if hum then
+                hum.JumpPower = 50
+                hum.JumpHeight = 7.2
+                hum.WalkSpeed = 16
+            end
+        end
     end)
 end
 
@@ -725,39 +820,39 @@ CreateToggle(MiscPage, "Stretched Res", "StretchedRes")
 CreateCategory(ExperimentalsPage, "Stat Changers", "7733715400")
 
 CreateSlider(ExperimentalsPage, "Dive Speed", 0, 5, "DiveSpeed", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameDiveSpeedMultiplier", val) end)
+    ApplyStatFull("DiveSpeed", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Spike Power", 0, 500, "SpikePower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameSpikePowerMultiplier", val) end)
+    ApplyStatFull("SpikePower", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Tilt Power", 0, 500, "TiltPower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameTiltPowerMultiplier", val) end)
+    ApplyStatFull("TiltPower", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Speed", 0, 1.5, "SpeedMult", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameSpeedMultiplier", val) end)
+    ApplyStatFull("SpeedMult", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Set Power", 0, 500, "SetPower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameSetPowerMultiplier", val) end)
+    ApplyStatFull("SetPower", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Serve Power", 0, 500, "ServePower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameServePowerMultiplier", val) end)
+    ApplyStatFull("ServePower", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Jump Power", 0, 5, "JumpPowerMult", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameJumpPowerMultiplier", val) end)
+    ApplyStatFull("JumpPowerMult", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Bump Power", 0, 500, "BumpPower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameBumpPowerMultiplier", val) end)
+    ApplyStatFull("BumpPower", val)
 end)
 
 CreateSlider(ExperimentalsPage, "Block Power", 0, 500, "BlockPower", function(val)
-    pcall(function() LocalPlayer:SetAttribute("GameBlockPowerMultiplier", val) end)
+    ApplyStatFull("BlockPower", val)
 end)
 
 CreateCategory(ExperimentalsPage, "Abilities", "7733978098")
@@ -882,9 +977,18 @@ UIS.InputBegan:Connect(function(input, gpe)
     if not gpe and input.KeyCode == Enum.KeyCode.Z and Config.PowerfulServeEnabled then
         pcall(function()
             local rs = game:GetService("ReplicatedStorage")
-            local knit = rs.Packages._Index["sleitnick_knit@1.7.0"].knit
-            local gs = knit.Services.GameService
-            gs.RF.Serve:InvokeServer(Vector3.new(0, 0, 0), math.huge)
+            for _, desc in ipairs(rs:GetDescendants()) do
+                if desc:IsA("RemoteFunction") and (desc.Name == "Serve" or desc.Name:lower():find("serve")) then
+                    pcall(function() desc:InvokeServer(Vector3.new(0, 0, 0), math.huge) end)
+                    pcall(function() desc:InvokeServer(Vector3.new(0, -1, 0), 9999999) end)
+                    pcall(function() desc:InvokeServer(math.huge) end)
+                end
+                if desc:IsA("RemoteEvent") and (desc.Name == "Serve" or desc.Name:lower():find("serve")) then
+                    pcall(function() desc:FireServer(Vector3.new(0, 0, 0), math.huge) end)
+                    pcall(function() desc:FireServer(Vector3.new(0, -1, 0), 9999999) end)
+                    pcall(function() desc:FireServer(math.huge) end)
+                end
+            end
         end)
     end
 end)
@@ -906,25 +1010,30 @@ UIS.InputBegan:Connect(function(input, gpe)
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function()
+task.spawn(function()
+    while RAGNAROK_ALIVE do
+        task.wait(1)
+        ApplyAllStats()
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(char)
     if not RAGNAROK_ALIVE then return end
+    task.wait(0.5)
+    ApplyAllStats()
+    HookAttributeEnforcement()
     if Config.AutoRotateEnabled then
         stopAutoRotateMonitor()
         startAutoRotateMonitor()
     end
+    task.wait(1)
+    ApplyAllStats()
+    task.wait(2)
+    ApplyAllStats()
 end)
 
-pcall(function()
-    if Config.DiveSpeed ~= 1 then LocalPlayer:SetAttribute("GameDiveSpeedMultiplier", Config.DiveSpeed) end
-    if Config.SpikePower ~= 1 then LocalPlayer:SetAttribute("GameSpikePowerMultiplier", Config.SpikePower) end
-    if Config.TiltPower ~= 1 then LocalPlayer:SetAttribute("GameTiltPowerMultiplier", Config.TiltPower) end
-    if Config.SpeedMult ~= 1 then LocalPlayer:SetAttribute("GameSpeedMultiplier", Config.SpeedMult) end
-    if Config.SetPower ~= 1 then LocalPlayer:SetAttribute("GameSetPowerMultiplier", Config.SetPower) end
-    if Config.ServePower ~= 1 then LocalPlayer:SetAttribute("GameServePowerMultiplier", Config.ServePower) end
-    if Config.JumpPowerMult ~= 1 then LocalPlayer:SetAttribute("GameJumpPowerMultiplier", Config.JumpPowerMult) end
-    if Config.BumpPower ~= 1 then LocalPlayer:SetAttribute("GameBumpPowerMultiplier", Config.BumpPower) end
-    if Config.BlockPower ~= 1 then LocalPlayer:SetAttribute("GameBlockPowerMultiplier", Config.BlockPower) end
-end)
+ApplyAllStats()
+HookAttributeEnforcement()
 
 if Config.AutoRotateEnabled then
     startAutoRotateMonitor()
