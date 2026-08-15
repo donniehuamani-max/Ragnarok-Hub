@@ -16,6 +16,7 @@ CoreGui = game:GetService("CoreGui")
 RunService = game:GetService("RunService")
 TweenService = game:GetService("TweenService")
 GuiService = game:GetService("GuiService")
+ContextActionService = game:GetService("ContextActionService")
 Camera = workspace.CurrentCamera
 LocalPlayer = Players.LocalPlayer
 
@@ -562,12 +563,27 @@ function ScrollActivePage(delta)
     page.CanvasPosition = Vector2.new(0, math.clamp(page.CanvasPosition.Y + delta, 0, maximum))
 end
 ApplyResponsiveLayout()
-UIS.InputChanged:Connect(function(input)
-    if not RAGNAROK_ALIVE or input.UserInputType ~= Enum.UserInputType.MouseWheel then
-        return
+function IsPointInsideGui(guiObject, position)
+    if not guiObject or not guiObject.Visible or not guiObject.Parent then
+        return false
     end
-    ScrollActivePage(-input.Position.Z * 54)
-end)
+    local absolutePosition = guiObject.AbsolutePosition
+    local absoluteSize = guiObject.AbsoluteSize
+    return position.X >= absolutePosition.X and position.X <= absolutePosition.X + absoluteSize.X and position.Y >= absolutePosition.Y and position.Y <= absolutePosition.Y + absoluteSize.Y
+end
+function HandleWheelAction(_, inputState, inputObject)
+    if inputState ~= Enum.UserInputState.Begin or not RAGNAROK_ALIVE then
+        return Enum.ContextActionResult.Pass
+    end
+    if not Main.Visible or not IsPointInsideGui(Main, inputObject.Position) then
+        return Enum.ContextActionResult.Pass
+    end
+    ScrollActivePage(-inputObject.Position.Z * 54)
+    return Enum.ContextActionResult.Sink
+end
+if ContextActionService and type(ContextActionService.BindActionAtPriority) == "function" then
+    ContextActionService:BindActionAtPriority("RagnarokHubWheelGuard", HandleWheelAction, false, 3000, Enum.UserInputType.MouseWheel)
+end
 function CreateCategory(parent, name, iconId)
     local f = Instance.new("Frame")
     f.Size = UDim2.new(1, -30, 0, 35)
@@ -1110,6 +1126,11 @@ function FullShutdown(reason)
             JumpConnection:Disconnect()
         end)
         JumpConnection = nil
+    end
+    if ContextActionService and type(ContextActionService.UnbindAction) == "function" then
+        pcall(function()
+            ContextActionService:UnbindAction("RagnarokHubWheelGuard")
+        end)
     end
     DisconnectRuntimeConnections()
     if type(getgenv) == "function" then

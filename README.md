@@ -12,7 +12,7 @@ También se puede ejecutar `main.lua` directamente desde el executor. La interfa
 
 La UI conserva la composición compacta de la base v1.0: ventana oscura, cabecera corta, icono flotante, pestañas horizontales, controles densos, sliders y menú de terminación. Las pestañas disponibles son `MAIN`, `MISC`, `ADVANCED` y `CONFIG`. Cada pestaña utiliza un viewport `ScrollingFrame` con canvas automático, scrollbar visible y altura responsive según la resolución de GUI, sin depender del CFrame de la cámara. Los botones usan `Activated` y la ventana, el icono y los sliders aceptan touch.
 
-La rueda del mouse desplaza la pestaña activa. `PageDown`, `ArrowDown`, `PageUp`, `ArrowUp`, `Home` y `End` permiten navegar sin depender del scrollbar. La ventana mantiene una altura limitada y ajusta su tamaño a resoluciones pequeñas.
+La rueda del mouse desplaza la pestaña activa solo cuando el cursor está dentro de la ventana. Fuera de `Main`, el evento pasa a Roblox y la cámara conserva su zoom normal. `PageDown`, `ArrowDown`, `PageUp`, `ArrowUp`, `Home` y `End` permiten navegar sin depender del scrollbar. La ventana mantiene una altura limitada y ajusta su tamaño a resoluciones pequeñas.
 
 ## Opciones funcionales
 
