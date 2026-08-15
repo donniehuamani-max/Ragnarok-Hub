@@ -179,10 +179,11 @@ Main = Instance.new("Frame")
 Main.Name = "Main"
 Main.Parent = Ragnarok
 Main.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-Main.Position = UDim2.new(0.5, -200, 0.5, -250)
-Main.Size = UDim2.new(0, 400, 0, 0)
-Main.AutomaticSize = Enum.AutomaticSize.Y
+Main.Position = UDim2.new(0.5, -200, 0.5, -260)
+Main.Size = UDim2.new(0, 400, 0, 520)
+Main.AutomaticSize = Enum.AutomaticSize.None
 Main.Visible = false
+Main.ClipsDescendants = true
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
 MainStroke = Instance.new("UIStroke", Main)
 MainStroke.Color = Color3.fromRGB(0, 191, 255)
@@ -286,27 +287,39 @@ TabList.FillDirection = Enum.FillDirection.Horizontal
 TabList.Parent = TabContainer
 
 Pages = Instance.new("Frame")
-Pages.Size = UDim2.new(1, 0, 0, 0)
-Pages.AutomaticSize = Enum.AutomaticSize.Y
+Pages.Size = UDim2.new(1, 0, 1, -85)
 Pages.Position = UDim2.new(0, 0, 0, 85)
 Pages.BackgroundTransparency = 1
+Pages.ClipsDescendants = true
 Pages.Parent = Main
 
 PageFrames = {}
 function CreatePage(name)
-    local Page = Instance.new("Frame")
-    Page.Size = UDim2.new(1, 0, 0, 0)
-    Page.AutomaticSize = Enum.AutomaticSize.Y
+    local Page = Instance.new("ScrollingFrame")
+    Page.Size = UDim2.new(1, 0, 1, 0)
     Page.BackgroundTransparency = 1
+    Page.BorderSizePixel = 0
     Page.Visible = false
+    Page.Active = true
+    Page.ScrollingEnabled = true
+    Page.ScrollingDirection = Enum.ScrollingDirection.Y
+    Page.ScrollBarThickness = 4
+    Page.ScrollBarImageColor3 = Color3.fromRGB(0, 191, 255)
+    Page.ScrollBarImageTransparency = 0.2
+    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Page.Parent = Pages
 
     local Layout = Instance.new("UIListLayout")
     Layout.Padding = UDim.new(0, 8)
     Layout.Parent = Page
 
-    Instance.new("UIPadding", Page).PaddingLeft = UDim.new(0, 15)
-    Instance.new("UIPadding", Page).PaddingBottom = UDim.new(0, 20)
+    local PagePadding = Instance.new("UIPadding")
+    PagePadding.PaddingLeft = UDim.new(0, 15)
+    PagePadding.PaddingRight = UDim.new(0, 7)
+    PagePadding.PaddingTop = UDim.new(0, 2)
+    PagePadding.PaddingBottom = UDim.new(0, 20)
+    PagePadding.Parent = Page
 
     local TabBtn = Instance.new("TextButton")
     TabBtn.Size = UDim2.new(0.25, 0, 1, 0)
@@ -331,7 +344,37 @@ MainPage = CreatePage("Main")
 MiscPage = CreatePage("Misc")
 PageFrames["Main"].Page.Visible = true
 PageFrames["Main"].Btn.TextColor3 = Color3.fromRGB(0, 191, 255)
-
+function ApplyResponsiveLayout()
+    Camera = workspace.CurrentCamera or Camera
+    local viewport = Camera and Camera.ViewportSize or Vector2.new(800, 600)
+    local width = math.clamp(viewport.X - 20, 300, 400)
+    local height = math.clamp(viewport.Y - 60, 280, 520)
+    Main.Size = UDim2.new(0, width, 0, height)
+    Main.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
+end
+function GetActiveScrollPage()
+    for _, pageData in pairs(PageFrames) do
+        if pageData.Page.Visible then
+            return pageData.Page
+        end
+    end
+    return nil
+end
+function ScrollActivePage(delta)
+    local page = GetActiveScrollPage()
+    if not page then
+        return
+    end
+    local maximum = math.max(0, page.AbsoluteCanvasSize.Y - page.AbsoluteWindowSize.Y)
+    page.CanvasPosition = Vector2.new(0, math.clamp(page.CanvasPosition.Y + delta, 0, maximum))
+end
+ApplyResponsiveLayout()
+UIS.InputChanged:Connect(function(input)
+    if not RAGNAROK_ALIVE or input.UserInputType ~= Enum.UserInputType.MouseWheel then
+        return
+    end
+    ScrollActivePage(-input.Position.Z * 54)
+end)
 function CreateCategory(parent, name, iconId)
     local f = Instance.new("Frame")
     f.Size = UDim2.new(1, -30, 0, 35)
@@ -1153,6 +1196,28 @@ function RegisterGlobalInput()
         local keyName = input.KeyCode.Name
         if Config.ToggleKey and keyName == Config.ToggleKey then
             ToggleMain()
+            return
+        end
+        if input.KeyCode == Enum.KeyCode.PageDown or input.KeyCode == Enum.KeyCode.Down then
+            ScrollActivePage(240)
+            return
+        end
+        if input.KeyCode == Enum.KeyCode.PageUp or input.KeyCode == Enum.KeyCode.Up then
+            ScrollActivePage(-240)
+            return
+        end
+        if input.KeyCode == Enum.KeyCode.Home then
+            local page = GetActiveScrollPage()
+            if page then
+                page.CanvasPosition = Vector2.new(0, 0)
+            end
+            return
+        end
+        if input.KeyCode == Enum.KeyCode.End then
+            local page = GetActiveScrollPage()
+            if page then
+                page.CanvasPosition = Vector2.new(0, math.max(0, page.AbsoluteCanvasSize.Y - page.AbsoluteWindowSize.Y))
+            end
             return
         end
         if Config.ShutdownKey and Config.ShutdownKey ~= "None" and keyName == Config.ShutdownKey then
@@ -2000,6 +2065,13 @@ function CheckExecutorState()
     SetFeatureState("runtime", RAGNAROK_ALIVE == true)
     return ready == true
 end
+if Camera then
+    Camera:GetPropertyChangedSignal("ViewportSize"):Connect(ApplyResponsiveLayout)
+end
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    Camera = workspace.CurrentCamera or Camera
+    ApplyResponsiveLayout()
+end)
 InstallExecutorRuntime()
 RefreshExtendedServices()
 AddRuntimeLog("system", "v1 compact interface restored")

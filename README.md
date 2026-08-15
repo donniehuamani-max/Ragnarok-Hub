@@ -10,7 +10,9 @@ También se puede ejecutar `main.lua` directamente desde el executor. La interfa
 
 ## Interfaz
 
-La UI conserva la composición compacta de la base v1.0: ventana oscura de 400 píxeles, cabecera corta, icono flotante, pestañas horizontales, controles densos, sliders y menú de terminación. Las pestañas disponibles son `MAIN`, `MISC`, `ADVANCED` y `CONFIG`.
+La UI conserva la composición compacta de la base v1.0: ventana oscura, cabecera corta, icono flotante, pestañas horizontales, controles densos, sliders y menú de terminación. Las pestañas disponibles son `MAIN`, `MISC`, `ADVANCED` y `CONFIG`. Cada pestaña utiliza un viewport `ScrollingFrame` con canvas automático, scrollbar visible y altura responsive según el viewport.
+
+La rueda del mouse desplaza la pestaña activa. `PageDown`, `ArrowDown`, `PageUp`, `ArrowUp`, `Home` y `End` permiten navegar sin depender del scrollbar. La ventana mantiene una altura limitada y ajusta su tamaño a resoluciones pequeñas.
 
 ## Opciones funcionales
 
