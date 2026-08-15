@@ -16,7 +16,7 @@ La rueda del mouse desplaza la pestaña activa solo cuando el cursor está dentr
 
 ## Opciones funcionales
 
-El runtime conecta hitbox visual local, escala, color, transparencia, actualización limitada, salto direccional, movimiento aéreo, velocidad aérea, rotación automática, anti AFK, FOV normal, FOV stretched, notificaciones, binds, persistencia, perfiles locales, exportación, importación, diagnóstico, apagado seguro y los multiplicadores de estadísticas de la base v1.0: Dive Speed, Spike Power, Tilt Power, Speed, Set Power, Serve Power, Jump Power, Bump Power y Block Power.
+El runtime conecta hitbox visual local, escala, color, transparencia, actualización limitada, salto direccional, movimiento aéreo, velocidad aérea, rotación automática, anti AFK, FOV normal, FOV stretched, notificaciones, persistencia dual, perfiles locales, exportación, importación, diagnóstico, apagado seguro y los multiplicadores de estadísticas de la base v1.0: Dive Speed, Spike Power, Tilt Power, Speed, Set Power, Serve Power, Jump Power, Bump Power y Block Power. Jump Power queda limitado a `0.5x-1.5x`, usa la estadística base capturada y respeta si el humanoid usa `JumpPower` o `JumpHeight`.
 
 Las funciones que dependan de autoridad del servidor no se fuerzan mediante enumeración arbitraria de remotos. El script controla únicamente lo que el cliente y el executor pueden aplicar de forma local y estable.
 
@@ -32,13 +32,15 @@ Las funciones que dependan de autoridad del servidor no se fuerzan mediante enum
 | `isfile` | Verificación de archivos |
 | `loadstring` o `load` | Compilación del loader |
 
-## Correcciones de 3.2
+## Correcciones de 3.3
 
-La UI dejó de crecer indefinidamente porque las páginas ahora son viewports desplazables. El layout usa la resolución de GUI para dimensionar la ventana y no actualiza la posición por cambios de cámara. El stats changer volvió a escribir los atributos históricos de jugador, personaje y humanoid, reaplicar valores tras respawn y restaurar los valores base al desactivarse o apagarse.
+La UI dejó de crecer indefinidamente porque las páginas ahora son viewports desplazables. El layout usa la resolución de GUI para dimensionar la ventana y no actualiza la posición por cambios de cámara. El stats changer volvió a escribir los atributos históricos de jugador, personaje y humanoid, reaplicar valores tras respawn y restaurar los valores base al desactivarse o apagarse. En 3.3, Jump Power está limitado a 0.5x-1.5x y la configuración se persiste en dos rutas con fallback, verificación de escritura y reaplicación al arranque.
 
 ## Informe técnico
 
-La regresión principal fue convertir una interfaz compacta en una jerarquía larga sin viewport. El segundo fallo fue utilizar la cámara como fuente del layout en vez de separar resolución de pantalla y estado de cámara. El tercer fallo fue eliminar el bloque histórico de stats durante la reestructuración v3. El cuarto fallo fue dejar eventos de mouse en controles que también debían aceptar touch. El quinto fallo fue validar sintaxis sin probar el comportamiento visual dentro de Roblox; la validación estática no sustituye una prueba en un executor real.
+La configuración se guarda en `RagnarokHub/config.json` y también en `RagnarokConfig.json` para compatibilidad legacy. El loader crea la carpeta cuando `makefolder` existe, escribe una copia temporal, conserva una ruta de respaldo, carga la ruta primaria con fallback legacy, reaplica los estados al iniciar y muestra el estado de guardado y la ruta cargada en `CONFIG`.
+
+La regresión principal fue convertir una interfaz compacta en una jerarquía larga sin viewport. El segundo fallo fue utilizar la cámara como fuente del layout en vez de separar resolución de pantalla y estado de cámara. El tercer fallo fue eliminar el bloque histórico de stats durante la reestructuración v3. El cuarto fallo fue dejar eventos de mouse en controles que también debían aceptar touch. El quinto fallo fue validar sintaxis sin probar el comportamiento visual dentro de Roblox; la validación estática no sustituye una prueba en un executor real. El sexto fallo fue guardar solo una ruta y no verificar el resultado del write; ahora hay ruta primaria, legacy, temporal y estado visible.
 
 La referencia oficial de Luau sirvió para confirmar que Luau prioriza compatibilidad con Lua 5.1 cuando es posible, seguridad, rendimiento y embebibilidad. No define APIs de executor ni garantiza la existencia de `getgenv`, `gethui`, `writefile` o `loadstring`; esas capacidades pertenecen al entorno que ejecuta el script.
 
@@ -50,7 +52,7 @@ La sesión expone `getgenv().RagnarokAPI` con `Toggle`, `Show`, `Hide`, `SetPage
 
 | Campo | Valor |
 |---|---|
-| Versión | 3.2.0-EXECUTOR |
+| Versión | 3.3.0-EXECUTOR |
 | Archivo principal | `main.lua` |
 | Loader | `loader.lua` |
 | Líneas | Más de 2000 |

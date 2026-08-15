@@ -1,4 +1,4 @@
-RAGNAROK_VERSION = "3.2.0-EXECUTOR"
+RAGNAROK_VERSION = "3.3.0-EXECUTOR"
 RAGNAROK_ALIVE = true
 RAGNAROK_START = os.clock()
 if type(getgenv) == "function" then
@@ -83,23 +83,90 @@ function SafeExecutorCall(callback, ...)
     end
     return pcall(callback, ...)
 end
+ConfigPrimaryPath = "RagnarokHub/config.json"
+ConfigLegacyPath = "RagnarokConfig.json"
+ConfigTempPath = "RagnarokHub/config.tmp"
+ConfigLastSaveStatus = "not-saved"
+ConfigLastLoadPath = "none"
+function EnsureConfigFolder()
+    if type(makefolder) == "function" then
+        pcall(function()
+            makefolder("RagnarokHub")
+        end)
+    end
+end
+function EncodeConfig()
+    local success, payload = pcall(function()
+        return HttpService:JSONEncode(Config)
+    end)
+    if not success or type(payload) ~= "string" or #payload == 0 then
+        return nil
+    end
+    return payload
+end
+function ReadConfigFile(path)
+    if type(readfile) ~= "function" then
+        return nil
+    end
+    if type(isfile) == "function" and not isfile(path) then
+        return nil
+    end
+    local success, content = pcall(function()
+        return readfile(path)
+    end)
+    if not success or type(content) ~= "string" or #content == 0 then
+        return nil
+    end
+    local decoded, decodeSuccess = nil, false
+    decodeSuccess, decoded = pcall(function()
+        return HttpService:JSONDecode(content)
+    end)
+    if not decodeSuccess or type(decoded) ~= "table" then
+        return nil
+    end
+    return decoded
+end
 function SaveConfig()
     if type(writefile) ~= "function" then
+        ConfigLastSaveStatus = "writefile-unavailable"
         return false
     end
-    local success = pcall(function()
-        writefile("RagnarokConfig.json", HttpService:JSONEncode(Config))
+    EnsureConfigFolder()
+    local payload = EncodeConfig()
+    if not payload then
+        ConfigLastSaveStatus = "encode-failed"
+        return false
+    end
+    local tempSuccess = pcall(function()
+        writefile(ConfigTempPath, payload)
     end)
-    return success
+    local primarySuccess = pcall(function()
+        writefile(ConfigPrimaryPath, payload)
+    end)
+    local legacySuccess = pcall(function()
+        writefile(ConfigLegacyPath, payload)
+    end)
+    if tempSuccess and type(delfile) == "function" then
+        pcall(function()
+            delfile(ConfigTempPath)
+        end)
+    end
+    if primarySuccess or legacySuccess then
+        ConfigLastSaveStatus = primarySuccess and "primary" or "legacy"
+        return true
+    end
+    ConfigLastSaveStatus = "write-failed"
+    return false
 end
 function LoadConfig()
-    if type(isfile) ~= "function" or type(readfile) ~= "function" or not isfile("RagnarokConfig.json") then
-        return false
+    local data = ReadConfigFile(ConfigPrimaryPath)
+    ConfigLastLoadPath = ConfigPrimaryPath
+    if not data then
+        data = ReadConfigFile(ConfigLegacyPath)
+        ConfigLastLoadPath = ConfigLegacyPath
     end
-    local success, data = pcall(function()
-        return HttpService:JSONDecode(readfile("RagnarokConfig.json"))
-    end)
-    if not success or type(data) ~= "table" then
+    if type(data) ~= "table" then
+        ConfigLastLoadPath = "none"
         return false
     end
     for k, v in pairs(data) do
@@ -107,6 +174,7 @@ function LoadConfig()
             Config[k] = v
         end
     end
+    ConfigLastSaveStatus = "loaded"
     return true
 end
 
@@ -129,6 +197,7 @@ StatsBaseline = {
     WalkSpeed = nil,
     JumpPower = nil,
     JumpHeight = nil,
+    UseJumpPower = true,
 }
 function DisconnectStatConnections()
     for _, connection in pairs(StatConnections) do
@@ -149,6 +218,7 @@ function CaptureStatsBaseline()
         StatsBaseline.WalkSpeed = humanoid.WalkSpeed
         StatsBaseline.JumpPower = humanoid.JumpPower
         StatsBaseline.JumpHeight = humanoid.JumpHeight
+        StatsBaseline.UseJumpPower = humanoid.UseJumpPower
     end
 end
 function ApplyStatValue(configKey, value)
@@ -193,10 +263,14 @@ function ApplyAllStats()
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         if Config.JumpPowerMult and Config.JumpPowerMult ~= 1 then
+            local jumpMultiplier = math.clamp(Config.JumpPowerMult, 0.5, 1.5)
             pcall(function()
-                humanoid.UseJumpPower = true
-                humanoid.JumpPower = StatsBaseline.JumpPower * Config.JumpPowerMult
-                humanoid.JumpHeight = StatsBaseline.JumpHeight * Config.JumpPowerMult
+                humanoid.UseJumpPower = StatsBaseline.UseJumpPower ~= false
+                if humanoid.UseJumpPower then
+                    humanoid.JumpPower = (StatsBaseline.JumpPower or 50) * jumpMultiplier
+                else
+                    humanoid.JumpHeight = (StatsBaseline.JumpHeight or 7.2) * jumpMultiplier
+                end
             end)
         end
         if Config.SpeedMult and Config.SpeedMult ~= 1 then
@@ -225,6 +299,7 @@ function ResetStats()
     if humanoid then
         pcall(function()
             humanoid.WalkSpeed = StatsBaseline.WalkSpeed or 16
+            humanoid.UseJumpPower = StatsBaseline.UseJumpPower ~= false
             humanoid.JumpPower = StatsBaseline.JumpPower or 50
             humanoid.JumpHeight = StatsBaseline.JumpHeight or 7.2
         end)
@@ -1058,6 +1133,9 @@ function RefreshAllControls()
     ApplyCameraSettings()
 end
 function RestoreDefaults()
+    if Config.EnableStatChangers then
+        ResetStats()
+    end
     local preservedPosition = Config.IconPos
     Config = {
         HitboxScale = 6,
@@ -1408,7 +1486,7 @@ CreateSlider(AdvancedPage, "Serve Power", 0, 500, "ServePower", function(value)
     ApplyStatValue("ServePower", value)
     HookStatEnforcement()
 end)
-CreateSlider(AdvancedPage, "Jump Power", 0, 5, "JumpPowerMult", function(value)
+CreateSlider(AdvancedPage, "Jump Power", 0.5, 1.5, "JumpPowerMult", function(value)
     ApplyStatValue("JumpPowerMult", value)
     ApplyAllStats()
     HookStatEnforcement()
@@ -1435,7 +1513,7 @@ CreateActionButton(ConfigPage, "SAVE CONFIGURATION", Color3.fromRGB(0, 191, 255)
 end, 2)
 CreateActionButton(ConfigPage, "LOAD CONFIGURATION", Color3.fromRGB(0, 191, 255), function()
     if LoadConfig() then
-        RefreshAllControls()
+        ApplyPersistedState()
         Notify("Configuration", true)
     end
 end, 3)
@@ -1451,6 +1529,8 @@ CreateInfoRow(ConfigPage, "getgenv", type(getgenv) == "function" and "READY" or 
 CreateInfoRow(ConfigPage, "gethui", type(gethui) == "function" and "READY" or "FALLBACK", 10)
 CreateInfoRow(ConfigPage, "writefile", type(writefile) == "function" and "READY" or "MEMORY", 11)
 CreateInfoRow(ConfigPage, "loadstring", type(loadstring) == "function" and "READY" or "UNUSED", 12)
+configSaveRow, configSaveValue = CreateInfoRow(ConfigPage, "Save status", ConfigLastSaveStatus, 13)
+configLoadRow, configLoadValue = CreateInfoRow(ConfigPage, "Load path", ConfigLastLoadPath, 14)
 function SetPage(name)
     if not RAGNAROK_ALIVE then
         return false
@@ -1780,7 +1860,7 @@ function NormalizeExecutorConfig()
     Config.SpeedMult = ValidateNumber(Config.SpeedMult, 0, 1.5, 1)
     Config.SetPower = ValidateNumber(Config.SetPower, 0, 500, 1)
     Config.ServePower = ValidateNumber(Config.ServePower, 0, 500, 1)
-    Config.JumpPowerMult = ValidateNumber(Config.JumpPowerMult, 0, 5, 1)
+    Config.JumpPowerMult = ValidateNumber(Config.JumpPowerMult, 0.5, 1.5, 1)
     Config.BumpPower = ValidateNumber(Config.BumpPower, 0, 500, 1)
     Config.BlockPower = ValidateNumber(Config.BlockPower, 0, 500, 1)
     if type(Config.Binds) ~= "table" then
@@ -2030,6 +2110,20 @@ end
 function CancelExecutorMaintenance()
     MaintenanceTask = nil
 end
+function ApplyPersistedState()
+    NormalizeExecutorConfig()
+    RefreshAllControls()
+    ApplyCameraSettings()
+    if Config.EnableStatChangers then
+        CaptureStatsBaseline()
+        ApplyAllStats()
+        HookStatEnforcement()
+    else
+        ResetStats()
+    end
+    SaveConfig()
+    return true
+end
 function InstallRuntimeSafety()
     DetectExecutorCapabilities()
     NormalizeExecutorConfig()
@@ -2037,6 +2131,7 @@ function InstallRuntimeSafety()
     ScheduleExecutorMaintenance()
 end
 InstallRuntimeSafety()
+ApplyPersistedState()
 ExecutorProfiles = {
     default = {
         HitboxScale = 6,
@@ -2323,6 +2418,12 @@ function RefreshExtendedServices()
     RefreshMovementService()
     RefreshCameraService()
     RefreshRuntimeRows()
+    if configSaveValue then
+        configSaveValue.Text = tostring(ConfigLastSaveStatus)
+    end
+    if configLoadValue then
+        configLoadValue.Text = tostring(ConfigLastLoadPath)
+    end
     RefreshLogPanel()
 end
 function ProtectExecutorGui(instance)
@@ -2466,7 +2567,9 @@ function BuildExecutorAPI()
         Save = SaveConfig,
         Load = function()
             local result = LoadConfig()
-            RefreshAllControls()
+            if result then
+                ApplyPersistedState()
+            end
             return result
         end,
         Reset = RestoreDefaults,
