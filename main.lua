@@ -1,4 +1,4 @@
-RAGNAROK_VERSION = "3.1.0-EXECUTOR"
+RAGNAROK_VERSION = "3.2.0-EXECUTOR"
 RAGNAROK_ALIVE = true
 RAGNAROK_START = os.clock()
 if type(getgenv) == "function" then
@@ -15,6 +15,7 @@ Players = game:GetService("Players")
 CoreGui = game:GetService("CoreGui")
 RunService = game:GetService("RunService")
 TweenService = game:GetService("TweenService")
+GuiService = game:GetService("GuiService")
 Camera = workspace.CurrentCamera
 LocalPlayer = Players.LocalPlayer
 
@@ -63,6 +64,16 @@ Config = {
     ShowNotifications = true,
     ToggleKey = "RightShift",
     ShutdownKey = "None",
+    EnableStatChangers = false,
+    DiveSpeed = 1,
+    SpikePower = 1,
+    TiltPower = 1,
+    SpeedMult = 1,
+    SetPower = 1,
+    ServePower = 1,
+    JumpPowerMult = 1,
+    BumpPower = 1,
+    BlockPower = 1,
 }
 
 function SafeExecutorCall(callback, ...)
@@ -100,6 +111,160 @@ end
 
 
 LoadConfig()
+StatAttrNames = {
+    DiveSpeed = "GameDiveSpeedMultiplier",
+    SpikePower = "GameSpikePowerMultiplier",
+    TiltPower = "GameTiltPowerMultiplier",
+    SpeedMult = "GameSpeedMultiplier",
+    SetPower = "GameSetPowerMultiplier",
+    ServePower = "GameServePowerMultiplier",
+    JumpPowerMult = "GameJumpPowerMultiplier",
+    BumpPower = "GameBumpPowerMultiplier",
+    BlockPower = "GameBlockPowerMultiplier",
+}
+StatConnections = {}
+StatsBaseline = {
+    CapturedCharacter = nil,
+    WalkSpeed = nil,
+    JumpPower = nil,
+    JumpHeight = nil,
+}
+function DisconnectStatConnections()
+    for _, connection in pairs(StatConnections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+    StatConnections = {}
+end
+function CaptureStatsBaseline()
+    local character = LocalPlayer and LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        return
+    end
+    if StatsBaseline.CapturedCharacter ~= character then
+        StatsBaseline.CapturedCharacter = character
+        StatsBaseline.WalkSpeed = humanoid.WalkSpeed
+        StatsBaseline.JumpPower = humanoid.JumpPower
+        StatsBaseline.JumpHeight = humanoid.JumpHeight
+    end
+end
+function ApplyStatValue(configKey, value)
+    if not Config.EnableStatChangers then
+        return false
+    end
+    local attribute = StatAttrNames[configKey]
+    local numericValue = tonumber(value)
+    if not attribute or not numericValue then
+        return false
+    end
+    pcall(function()
+        LocalPlayer:SetAttribute(attribute, numericValue)
+    end)
+    local character = LocalPlayer.Character
+    if character then
+        pcall(function()
+            character:SetAttribute(attribute, numericValue)
+        end)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            pcall(function()
+                humanoid:SetAttribute(attribute, numericValue)
+            end)
+        end
+    end
+    return true
+end
+function ApplyAllStats()
+    CaptureStatsBaseline()
+    if not Config.EnableStatChangers then
+        ResetStats()
+        return false
+    end
+    for configKey, attribute in pairs(StatAttrNames) do
+        local value = tonumber(Config[configKey]) or 1
+        if value ~= 1 then
+            ApplyStatValue(configKey, value)
+        end
+    end
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        if Config.JumpPowerMult and Config.JumpPowerMult ~= 1 then
+            pcall(function()
+                humanoid.UseJumpPower = true
+                humanoid.JumpPower = StatsBaseline.JumpPower * Config.JumpPowerMult
+                humanoid.JumpHeight = StatsBaseline.JumpHeight * Config.JumpPowerMult
+            end)
+        end
+        if Config.SpeedMult and Config.SpeedMult ~= 1 then
+            pcall(function()
+                humanoid.WalkSpeed = StatsBaseline.WalkSpeed * Config.SpeedMult
+            end)
+        end
+    end
+    return true
+end
+function ResetStats()
+    DisconnectStatConnections()
+    for _, attribute in pairs(StatAttrNames) do
+        pcall(function()
+            LocalPlayer:SetAttribute(attribute, 1)
+        end)
+        local character = LocalPlayer.Character
+        if character then
+            pcall(function()
+                character:SetAttribute(attribute, 1)
+            end)
+        end
+    end
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function()
+            humanoid.WalkSpeed = StatsBaseline.WalkSpeed or 16
+            humanoid.JumpPower = StatsBaseline.JumpPower or 50
+            humanoid.JumpHeight = StatsBaseline.JumpHeight or 7.2
+        end)
+    end
+    return true
+end
+function HookStatEnforcement()
+    DisconnectStatConnections()
+    if not Config.EnableStatChangers then
+        return false
+    end
+    for configKey, attribute in pairs(StatAttrNames) do
+        local expected = tonumber(Config[configKey]) or 1
+        if expected ~= 1 then
+            local connection = LocalPlayer:GetAttributeChangedSignal(attribute):Connect(function()
+                if not RAGNAROK_ALIVE or not Config.EnableStatChangers then
+                    return
+                end
+                local current = LocalPlayer:GetAttribute(attribute)
+                if current ~= expected then
+                    pcall(function()
+                        LocalPlayer:SetAttribute(attribute, expected)
+                    end)
+                end
+            end)
+            table.insert(StatConnections, connection)
+        end
+    end
+    return true
+end
+function SetStatsEnabled(enabled)
+    Config.EnableStatChangers = enabled == true
+    if Config.EnableStatChangers then
+        ApplyAllStats()
+        HookStatEnforcement()
+    else
+        ResetStats()
+    end
+    SaveConfig()
+    return Config.EnableStatChangers
+end
 ControlRegistry = {}
 InputConnections = {}
 
@@ -173,13 +338,16 @@ Ragnarok = Instance.new("ScreenGui")
 Ragnarok.Name = "RagnarokHub"
 Ragnarok.ResetOnSpawn = false
 Ragnarok.DisplayOrder = 10
+Ragnarok.IgnoreGuiInset = true
+Ragnarok.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 Protect(Ragnarok)
 
 Main = Instance.new("Frame")
 Main.Name = "Main"
 Main.Parent = Ragnarok
 Main.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-Main.Position = UDim2.new(0.5, -200, 0.5, -260)
+Main.AnchorPoint = Vector2.new(0.5, 0.5)
+Main.Position = UDim2.new(0.5, 0, 0.5, 0)
 Main.Size = UDim2.new(0, 400, 0, 520)
 Main.AutomaticSize = Enum.AutomaticSize.None
 Main.Visible = false
@@ -235,7 +403,7 @@ function CreateHeaderBtn(text, xOffset, callback)
     b.TextSize = 16
     b.Parent = Header
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-    b.MouseButton1Click:Connect(callback)
+    b.Activated:Connect(callback)
     return b
 end
 
@@ -327,10 +495,15 @@ function CreatePage(name)
     TabBtn.Font = Enum.Font.GothamBold
     TabBtn.Text = name:upper()
     TabBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
-    TabBtn.TextSize = 14
+    TabBtn.TextSize = 12
+    TabBtn.TextScaled = true
+    local TabConstraint = Instance.new("UITextSizeConstraint")
+    TabConstraint.MinTextSize = 8
+    TabConstraint.MaxTextSize = 13
+    TabConstraint.Parent = TabBtn
     TabBtn.Parent = TabContainer
 
-    TabBtn.MouseButton1Click:Connect(function()
+    TabBtn.Activated:Connect(function()
         for _, p in pairs(PageFrames) do p.Page.Visible = false p.Btn.TextColor3 = Color3.fromRGB(150, 150, 150) end
         Page.Visible = true
         TabBtn.TextColor3 = Color3.fromRGB(0, 191, 255)
@@ -344,13 +517,33 @@ MainPage = CreatePage("Main")
 MiscPage = CreatePage("Misc")
 PageFrames["Main"].Page.Visible = true
 PageFrames["Main"].Btn.TextColor3 = Color3.fromRGB(0, 191, 255)
+LayoutState = {
+    Width = 0,
+    Height = 0,
+}
+function GetScreenResolution()
+    if GuiService and type(GuiService.GetScreenResolution) == "function" then
+        local success, resolution = pcall(function()
+            return GuiService:GetScreenResolution()
+        end)
+        if success and typeof(resolution) == "Vector2" then
+            return resolution
+        end
+    end
+    local fallbackCamera = workspace.CurrentCamera
+    return fallbackCamera and fallbackCamera.ViewportSize or Vector2.new(800, 600)
+end
 function ApplyResponsiveLayout()
-    Camera = workspace.CurrentCamera or Camera
-    local viewport = Camera and Camera.ViewportSize or Vector2.new(800, 600)
-    local width = math.clamp(viewport.X - 20, 300, 400)
-    local height = math.clamp(viewport.Y - 60, 280, 520)
+    local viewport = GetScreenResolution()
+    local width = math.clamp(viewport.X - 12, 240, 400)
+    local height = math.clamp(viewport.Y - 48, 220, 520)
+    if LayoutState.Width == width and LayoutState.Height == height then
+        return
+    end
+    LayoutState.Width = width
+    LayoutState.Height = height
     Main.Size = UDim2.new(0, width, 0, height)
-    Main.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
+    Main.Position = UDim2.new(0.5, 0, 0.5, 0)
 end
 function GetActiveScrollPage()
     for _, pageData in pairs(PageFrames) do
@@ -427,7 +620,7 @@ is.Transparency = 0.4
 function MakeDraggable(obj, target, isIcon)
     local dragging, dragInput, dragStart, startPos
     obj.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = target.Position
@@ -443,14 +636,19 @@ function MakeDraggable(obj, target, isIcon)
         end
     end)
     obj.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
     UIS.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
-            target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            local viewport = GetScreenResolution()
+            local width = target.AbsoluteSize.X
+            local height = target.AbsoluteSize.Y
+            local nextX = math.clamp(startPos.X.Offset + delta.X, -viewport.X / 2 + width / 2, viewport.X / 2 - width / 2)
+            local nextY = math.clamp(startPos.Y.Offset + delta.Y, -viewport.Y / 2 + height / 2, viewport.Y / 2 - height / 2)
+            target.Position = UDim2.new(0.5, nextX, 0.5, nextY)
         end
     end)
 end
@@ -458,7 +656,7 @@ end
 MakeDraggable(Header, Main, false)
 MakeDraggable(Icon, Icon, true)
 
-Icon.MouseButton1Click:Connect(function()
+Icon.Activated:Connect(function()
     Main.Visible = true
     Main.BackgroundTransparency = 1
     TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundTransparency = 0}):Play()
@@ -523,7 +721,7 @@ function CreateTBtn(text, pos, color, callback)
     bs.Color = color
     bs.Thickness = 1.5
     bs.Transparency = 0.6
-    b.MouseButton1Click:Connect(callback)
+    b.Activated:Connect(callback)
     b.MouseEnter:Connect(function() TweenService:Create(bs, TweenInfo.new(0.2), {Transparency = 0}):Play() end)
     b.MouseLeave:Connect(function() TweenService:Create(bs, TweenInfo.new(0.2), {Transparency = 0.6}):Play() end)
 end
@@ -552,9 +750,9 @@ TCancel.TextColor3 = Color3.fromRGB(100, 100, 100)
 TCancel.TextSize = 12
 TCancel.ZIndex = 5002
 TCancel.Parent = TerminationMenu
-TCancel.MouseButton1Click:Connect(function() TerminationMenu.Visible = false end)
+TCancel.Activated:Connect(function() TerminationMenu.Visible = false end)
 
-function CreateToggle(parent, name, configKey)
+function CreateToggle(parent, name, configKey, callback)
     local f = Instance.new("Frame")
     f.Size = UDim2.new(1, -30, 0, 42)
     f.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
@@ -609,6 +807,9 @@ function CreateToggle(parent, name, configKey)
         end
         Notify(name, Config[configKey])
         SaveConfig()
+        if type(callback) == "function" then
+            callback(Config[configKey])
+        end
     end
     ControlRegistry[configKey] = function()
         local enabled = Config[configKey] == true
@@ -616,10 +817,10 @@ function CreateToggle(parent, name, configKey)
         ind.Position = enabled and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
     end
 
-    b.MouseButton1Click:Connect(Toggle)
+    b.Activated:Connect(Toggle)
 
     local binding = false
-    bind.MouseButton1Click:Connect(function()
+    bind.Activated:Connect(function()
         binding = true
         bind.Text = "..."
         local connection
@@ -647,7 +848,7 @@ function CreateToggle(parent, name, configKey)
     end)
 end
 
-function CreateSlider(parent, name, min, max, configKey)
+function CreateSlider(parent, name, min, max, configKey, callback)
     local f = Instance.new("Frame")
     f.Size = UDim2.new(1, -30, 0, 55)
     f.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
@@ -697,6 +898,9 @@ function CreateSlider(parent, name, min, max, configKey)
         v.Text = tostring(val)
         Config[configKey] = val
         SaveConfig()
+        if type(callback) == "function" then
+            callback(val)
+        end
     end
 
     ControlRegistry[configKey] = function()
@@ -705,9 +909,22 @@ function CreateSlider(parent, name, min, max, configKey)
         fill.Size = UDim2.new(alpha, 0, 1, 0)
         v.Text = string.format("%.1f", current)
     end
-    bar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true Update(i) end end)
-    UIS.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then Update(i) end end)
-    UIS.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            Update(i)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            Update(i)
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
 end
 
 CreateCategory(MainPage, "Game", "7733993211")
@@ -845,6 +1062,16 @@ function RestoreDefaults()
         ShowNotifications = true,
         ToggleKey = "RightShift",
         ShutdownKey = "None",
+        EnableStatChangers = false,
+        DiveSpeed = 1,
+        SpikePower = 1,
+        TiltPower = 1,
+        SpeedMult = 1,
+        SetPower = 1,
+        ServePower = 1,
+        JumpPowerMult = 1,
+        BumpPower = 1,
+        BlockPower = 1,
     }
     ClearHitboxes()
     RefreshAllControls()
@@ -853,6 +1080,9 @@ end
 function FullShutdown(reason)
     if not RAGNAROK_ALIVE then
         return
+    end
+    if Config.EnableStatChangers then
+        ResetStats()
     end
     RAGNAROK_ALIVE = false
     ShutdownReason = reason or "manual"
@@ -935,7 +1165,7 @@ function CreateActionButton(parent, text, color, callback, order)
     stroke.Color = color
     stroke.Thickness = 1.2
     stroke.Transparency = 0.55
-    button.MouseButton1Click:Connect(callback)
+    button.Activated:Connect(callback)
     button.MouseEnter:Connect(function()
         TweenService:Create(stroke, TweenInfo.new(0.16), {Transparency = 0}):Play()
     end)
@@ -1000,7 +1230,7 @@ function CreateKeybindRow(parent, label, configKey, order)
     key.TextSize = 10
     key.Parent = row
     Instance.new("UICorner", key).CornerRadius = UDim.new(0, 5)
-    key.MouseButton1Click:Connect(function()
+    key.Activated:Connect(function()
         SetBinding(configKey, key)
     end)
     return row
@@ -1066,7 +1296,7 @@ function CreateOptionButton(parent, label, options, configKey, order)
             break
         end
     end
-    button.MouseButton1Click:Connect(function()
+    button.Activated:Connect(function()
         index = index % #options + 1
         Config[configKey] = options[index]
         button.Text = tostring(Config[configKey])
@@ -1107,6 +1337,9 @@ function GetRuntimeSnapshot()
         HitboxEnabled = Config.HitboxEnabled,
         AirMoveEnabled = Config.AirMoveEnabled,
         AntiAFK = Config.AntiAFK,
+        StatChangers = Config.EnableStatChangers,
+        ScreenWidth = GetScreenResolution().X,
+        ScreenHeight = GetScreenResolution().Y,
     }
 end
 AdvancedPage = CreatePage("Advanced")
@@ -1125,6 +1358,53 @@ CreateActionButton(AdvancedPage, "CLEAR VISUAL HITBOXES", Color3.fromRGB(255, 17
     ClearHitboxes()
     Notify("Hitboxes", true)
 end, 9)
+CreateCategory(AdvancedPage, "Stat Changers", "7733715400")
+CreateToggle(AdvancedPage, "Enable Stat Changers", "EnableStatChangers", function(enabled)
+    SetStatsEnabled(enabled)
+end)
+CreateSlider(AdvancedPage, "Dive Speed", 0, 5, "DiveSpeed", function(value)
+    ApplyStatValue("DiveSpeed", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Spike Power", 0, 500, "SpikePower", function(value)
+    ApplyStatValue("SpikePower", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Tilt Power", 0, 500, "TiltPower", function(value)
+    ApplyStatValue("TiltPower", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Speed", 0, 1.5, "SpeedMult", function(value)
+    ApplyStatValue("SpeedMult", value)
+    ApplyAllStats()
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Set Power", 0, 500, "SetPower", function(value)
+    ApplyStatValue("SetPower", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Serve Power", 0, 500, "ServePower", function(value)
+    ApplyStatValue("ServePower", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Jump Power", 0, 5, "JumpPowerMult", function(value)
+    ApplyStatValue("JumpPowerMult", value)
+    ApplyAllStats()
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Bump Power", 0, 500, "BumpPower", function(value)
+    ApplyStatValue("BumpPower", value)
+    HookStatEnforcement()
+end)
+CreateSlider(AdvancedPage, "Block Power", 0, 500, "BlockPower", function(value)
+    ApplyStatValue("BlockPower", value)
+    HookStatEnforcement()
+end)
+CreateActionButton(AdvancedPage, "RESET STAT ATTRIBUTES", Color3.fromRGB(255, 170, 70), function()
+    ResetStats()
+    RefreshAllControls()
+    Notify("Stats", true)
+end, 20)
 CreateCategory(ConfigPage, "Profile", "7733993211")
 CreateStatusHeader(ConfigPage, "Configuration", "Executor file persistence and hotkey routing.", 1)
 CreateActionButton(ConfigPage, "SAVE CONFIGURATION", Color3.fromRGB(0, 191, 255), function()
@@ -1238,8 +1518,13 @@ function RegisterCharacterLifecycle()
                 return
             end
             local humanoid = character:FindFirstChildOfClass("Humanoid")
+            CaptureStatsBaseline()
             if humanoid and Config.AutoRotateEnabled then
                 humanoid.AutoRotate = true
+            end
+            if Config.EnableStatChangers then
+                ApplyAllStats()
+                HookStatEnforcement()
             end
             ApplyCameraSettings()
         end)
@@ -1467,6 +1752,16 @@ function NormalizeExecutorConfig()
     Config.HitboxColor = ValidateString(Config.HitboxColor, "Cyan")
     Config.ToggleKey = ValidateString(Config.ToggleKey, "RightShift")
     Config.ShutdownKey = ValidateString(Config.ShutdownKey, "None")
+    Config.EnableStatChangers = ValidateBoolean(Config.EnableStatChangers, false)
+    Config.DiveSpeed = ValidateNumber(Config.DiveSpeed, 0, 5, 1)
+    Config.SpikePower = ValidateNumber(Config.SpikePower, 0, 500, 1)
+    Config.TiltPower = ValidateNumber(Config.TiltPower, 0, 500, 1)
+    Config.SpeedMult = ValidateNumber(Config.SpeedMult, 0, 1.5, 1)
+    Config.SetPower = ValidateNumber(Config.SetPower, 0, 500, 1)
+    Config.ServePower = ValidateNumber(Config.ServePower, 0, 500, 1)
+    Config.JumpPowerMult = ValidateNumber(Config.JumpPowerMult, 0, 5, 1)
+    Config.BumpPower = ValidateNumber(Config.BumpPower, 0, 500, 1)
+    Config.BlockPower = ValidateNumber(Config.BlockPower, 0, 500, 1)
     if type(Config.Binds) ~= "table" then
         Config.Binds = {}
     end
@@ -1655,6 +1950,13 @@ function RefreshExecutorServices()
     else
         StopAntiAfkService()
     end
+    if Config.EnableStatChangers then
+        ApplyAllStats()
+        HookStatEnforcement()
+        SetFeatureState("stats", true)
+    else
+        SetFeatureState("stats", false)
+    end
 end
 function RuntimeDiagnostic()
     DetectExecutorCapabilities()
@@ -1692,6 +1994,7 @@ function ScheduleExecutorMaintenance()
             end
             RuntimeServices.HeartbeatCount = RuntimeServices.HeartbeatCount + 1
             RuntimeServices.LastHeartbeat = os.clock()
+            ApplyResponsiveLayout()
             RefreshExecutorServices()
             UpdateRuntimeRowsExtended()
             if RuntimeServices.LastConfigSave == 0 then
@@ -2065,13 +2368,6 @@ function CheckExecutorState()
     SetFeatureState("runtime", RAGNAROK_ALIVE == true)
     return ready == true
 end
-if Camera then
-    Camera:GetPropertyChangedSignal("ViewportSize"):Connect(ApplyResponsiveLayout)
-end
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-    Camera = workspace.CurrentCamera or Camera
-    ApplyResponsiveLayout()
-end)
 InstallExecutorRuntime()
 RefreshExtendedServices()
 AddRuntimeLog("system", "v1 compact interface restored")
@@ -2124,6 +2420,23 @@ function BuildExecutorAPI()
         SetValue = SetConfigValue,
         GetConfig = GetConfigSnapshot,
         GetState = GetRuntimeSnapshot,
+        GetStats = function()
+            return {
+                Enabled = Config.EnableStatChangers,
+                DiveSpeed = Config.DiveSpeed,
+                SpikePower = Config.SpikePower,
+                TiltPower = Config.TiltPower,
+                SpeedMult = Config.SpeedMult,
+                SetPower = Config.SetPower,
+                ServePower = Config.ServePower,
+                JumpPowerMult = Config.JumpPowerMult,
+                BumpPower = Config.BumpPower,
+                BlockPower = Config.BlockPower,
+            }
+        end,
+        SetStatsEnabled = SetStatsEnabled,
+        ApplyAllStats = ApplyAllStats,
+        ResetStats = ResetStats,
         GetRuntime = RuntimeDiagnostic,
         GetEnvironment = GetExecutorEnvironment,
         GetLogs = GetRuntimeLog,
