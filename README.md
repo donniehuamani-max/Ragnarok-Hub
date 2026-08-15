@@ -1,38 +1,45 @@
-# Ragnarok Hub v2.0
+# Ragnarok Hub v3.0
 
-Ragnarok Hub v2.0 es un runtime Luau de interfaz compacta para control, configuración y diagnóstico local. La implementación está concentrada en `main.lua` y mantiene un diseño oscuro, modular y orientado a estado.
+Ragnarok Hub v3.0 es un runtime Luau modular con configuración versionada, perfiles aislados, estado observable y herramientas de diagnóstico integradas.
 
-## Alcance
+## Entrega
 
-La versión 2.0 incorpora un shell redimensionado, navegación por páginas, búsqueda de controles, notificaciones con cola, configuración normalizada, persistencia versionada, restauración de valores base, ciclo de vida de personaje, cierre seguro, métricas de runtime, control de cámara, control visual de hitbox, movimiento aéreo, salto direccional, rotación automática, anti AFK, parámetros experimentales, atajos configurables y API pública de sesión.
+El paquete contiene `main.lua` y este documento. La copia fue preparada fuera del repositorio de GitHub. No se creó commit y no se ejecutó push.
 
-## Instalación
+## Cambios de v3.0
 
-Cargar `main.lua` en un entorno Luau compatible con Roblox. La interfaz se inicia minimizada en el icono flotante cuando la opción correspondiente está activa. El atajo inicial para abrir o cerrar el panel es `RightShift`.
+La versión añade una matriz de tres perfiles independientes, migración desde la ruta v2, guardado automático configurable, estado con revisiones, listeners de cambios, ledger de sesión limitado, scheduler de tareas, inspector de runtime, paleta de comandos, layout compacto, estándar y ancho, API pública ampliada y cierre seguro. El parche correctivo elimina locals de nivel superior para evitar el límite de registros del compilador y estabiliza las referencias adelantadas.
 
-## Persistencia
+## Funciones principales
 
-El archivo se guarda en `RagnarokHub/v2/config.json` cuando el entorno expone las funciones de archivo necesarias. La configuración se normaliza contra el esquema de v2 y se ignoran valores inválidos. La posición de la ventana, los atajos y los parámetros de cada sección se mantienen entre sesiones.
+El runtime conserva las páginas Dashboard, Gameplay, Movement, Visuals, Experimental, Utilities y Settings. Se mantienen el control visual de hitbox, salto direccional, movimiento aéreo, rotación, cámara, anti AFK, sincronización de atributos, persistencia, notificaciones, búsqueda y atajos.
 
-## Arquitectura
+La paleta de comandos se abre con `F2` por defecto. Permite navegar entre páginas, guardar o recargar el perfil, refrescar el runtime, restaurar valores, cambiar layout, cambiar de perfil y detener la sesión.
 
-El runtime se divide en configuración, persistencia, tema visual, fábrica de componentes, registro de controles, páginas, controladores funcionales, ciclo de personaje, métricas, búsqueda, atajos, diagnóstico y apagado. Todas las conexiones se registran para poder liberar recursos durante el cierre.
+## Perfiles
 
-## Controladores
+Los perfiles disponibles son `alpha`, `beta` y `gamma`. Cada perfil se guarda en una ruta separada dentro de `RagnarokHub/v3/`. El perfil `alpha` puede migrar automáticamente el archivo legado de `RagnarokHub/v2/config.json`.
 
-Los controladores de `hitbox`, `movement`, `stats`, `visuals` y `utilities` se activan por estado. Cada controlador expone inicio, detención y refresco. La actualización visual usa cadencia limitada y evita enumeraciones de remotos o llamadas arbitrarias a servicios del juego.
+## Loader
 
-## Compatibilidad
+Ejecutar `loader.lua` para descargar y ejecutar la versión publicada de `main.lua`. El loader comprueba `loadstring` o `load`, valida que la fuente no esté vacía, verifica la compilación y encapsula la ejecución con `pcall`.
 
-Requiere `UserInputService`, `Players`, `RunService`, `TweenService`, `GuiService`, `Stats`, `CoreGui` y una cámara activa. Las funciones de persistencia y protección de interfaz son opcionales; si no están disponibles, el runtime continúa con configuración en memoria.
+## API pública
 
-## Versión
+La sesión expone `getgenv().RagnarokAPI` con métodos para obtener estado, cambiar valores, suscribirse a cambios, cambiar perfiles, ejecutar comandos, inspeccionar el runtime, leer el historial, guardar, recargar, reconciliar y cerrar la sesión.
+
+## Validación
 
 | Campo | Valor |
 |---|---|
-| Versión | 2.0.0 |
-| Build | 2026.08 |
+| Versión | 3.0.0 |
+| Build | 2026.08-R3 |
 | Archivo principal | `main.lua` |
-| Líneas de código | Más de 2600 |
-| Comentarios de código | 0 |
-| Persistencia | `RagnarokHub/v2/config.json` |
+| Líneas de código | Más de 3300 |
+| Comentarios en código | 0 |
+| Registro local superior | 0 |
+| Estado del parche | Compilador estable |
+| Commit GitHub | Ninguno |
+| Push GitHub | Ninguno |
+| Persistencia v3 | `RagnarokHub/v3/{profile}.json` |
+| Loader | `loader.lua` |
