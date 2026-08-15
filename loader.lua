@@ -30,19 +30,19 @@ end
 local function Execute()
     local compiler = ResolveCompiler()
     if not compiler then
-        error("Ragnarok loader: loadstring/load unavailable")
+        error("Ragnarok executor loader: loadstring/load unavailable")
     end
     local source, fetchError = FetchSource()
     if not source then
-        error("Ragnarok loader: source fetch failed: " .. tostring(fetchError))
+        error("Ragnarok executor loader: source fetch failed: " .. tostring(fetchError))
     end
     local compiled, compileError = compiler(source)
     if type(compiled) ~= "function" then
-        error("Ragnarok loader: compilation failed: " .. tostring(compileError))
+        error("Ragnarok executor loader: compilation failed: " .. tostring(compileError))
     end
     local success, result = pcall(compiled)
     if not success then
-        error("Ragnarok loader: execution failed: " .. tostring(result))
+        error("Ragnarok executor loader: execution failed: " .. tostring(result))
     end
     return result
 end

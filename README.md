@@ -1,45 +1,48 @@
-# Ragnarok Hub v3.0
+# Ragnarok Hub Executor 3.1
 
-Ragnarok Hub v3.0 es un runtime Luau modular con configuración versionada, perfiles aislados, estado observable y herramientas de diagnóstico integradas.
+Ragnarok Hub Executor es un script Luau para ejecutores externos de Roblox. No es un plugin, no es un proyecto de Roblox Studio y no requiere publicación dentro de Studio.
 
-## Entrega
+## Ejecución
 
-El paquete contiene `main.lua` y este documento. La copia fue preparada fuera del repositorio de GitHub. No se creó commit y no se ejecutó push.
+Ejecutar `loader.lua` desde el executor. El loader valida `loadstring` o `load`, descarga `main.lua` desde la rama principal, comprueba la compilación y encapsula la ejecución.
 
-## Cambios de v3.0
+También se puede ejecutar `main.lua` directamente desde el executor. La interfaz se monta en `gethui()` cuando existe, usa `syn.protect_gui` cuando está disponible y utiliza `CoreGui` como fallback.
 
-La versión añade una matriz de tres perfiles independientes, migración desde la ruta v2, guardado automático configurable, estado con revisiones, listeners de cambios, ledger de sesión limitado, scheduler de tareas, inspector de runtime, paleta de comandos, layout compacto, estándar y ancho, API pública ampliada y cierre seguro. El parche correctivo elimina locals de nivel superior para evitar el límite de registros del compilador y estabiliza las referencias adelantadas.
+## Interfaz
 
-## Funciones principales
+La UI conserva la composición compacta de la base v1.0: ventana oscura de 400 píxeles, cabecera corta, icono flotante, pestañas horizontales, controles densos, sliders y menú de terminación. Las pestañas disponibles son `MAIN`, `MISC`, `ADVANCED` y `CONFIG`.
 
-El runtime conserva las páginas Dashboard, Gameplay, Movement, Visuals, Experimental, Utilities y Settings. Se mantienen el control visual de hitbox, salto direccional, movimiento aéreo, rotación, cámara, anti AFK, sincronización de atributos, persistencia, notificaciones, búsqueda y atajos.
+## Opciones funcionales
 
-La paleta de comandos se abre con `F2` por defecto. Permite navegar entre páginas, guardar o recargar el perfil, refrescar el runtime, restaurar valores, cambiar layout, cambiar de perfil y detener la sesión.
+El runtime conecta hitbox visual local, escala, color, transparencia, actualización limitada, salto direccional, movimiento aéreo, velocidad aérea, rotación automática, anti AFK, FOV normal, FOV stretched, notificaciones, binds, persistencia, perfiles locales, exportación, importación, diagnóstico y apagado seguro.
 
-## Perfiles
+Las funciones que dependan de autoridad del servidor no se fuerzan mediante enumeración arbitraria de remotos. El script controla únicamente lo que el cliente y el executor pueden aplicar de forma local y estable.
 
-Los perfiles disponibles son `alpha`, `beta` y `gamma`. Cada perfil se guarda en una ruta separada dentro de `RagnarokHub/v3/`. El perfil `alpha` puede migrar automáticamente el archivo legado de `RagnarokHub/v2/config.json`.
+## APIs executor detectadas
 
-## Loader
-
-Ejecutar `loader.lua` para descargar y ejecutar la versión publicada de `main.lua`. El loader comprueba `loadstring` o `load`, valida que la fuente no esté vacía, verifica la compilación y encapsula la ejecución con `pcall`.
+| API | Uso |
+|---|---|
+| `getgenv` | Estado global y API de sesión |
+| `gethui` | Protección de GUI |
+| `syn.protect_gui` | Protección alternativa de GUI |
+| `writefile` | Guardado de configuración y snapshot |
+| `readfile` | Carga de configuración y snapshot |
+| `isfile` | Verificación de archivos |
+| `loadstring` o `load` | Compilación del loader |
 
 ## API pública
 
-La sesión expone `getgenv().RagnarokAPI` con métodos para obtener estado, cambiar valores, suscribirse a cambios, cambiar perfiles, ejecutar comandos, inspeccionar el runtime, leer el historial, guardar, recargar, reconciliar y cerrar la sesión.
+La sesión expone `getgenv().RagnarokAPI` con `Toggle`, `Show`, `Hide`, `SetPage`, `SetValue`, `GetConfig`, `GetState`, `GetRuntime`, `GetEnvironment`, `GetLogs`, `ClearLogs`, `SelfTest`, `Save`, `Load`, `Reset`, `Export`, `Import`, `SaveProfile`, `LoadProfile`, `CaptureProfile`, `ListProfiles`, `Notify`, `Shutdown` y `Ready`.
 
-## Validación
+## Compatibilidad
 
 | Campo | Valor |
 |---|---|
-| Versión | 3.0.0 |
-| Build | 2026.08-R3 |
+| Versión | 3.1.0-EXECUTOR |
 | Archivo principal | `main.lua` |
-| Líneas de código | Más de 3300 |
-| Comentarios en código | 0 |
-| Registro local superior | 0 |
-| Estado del parche | Compilador estable |
-| Commit GitHub | Ninguno |
-| Push GitHub | Ninguno |
-| Persistencia v3 | `RagnarokHub/v3/{profile}.json` |
 | Loader | `loader.lua` |
+| Líneas | Más de 2000 |
+| Locals raíz | 0 |
+| Comentarios en código | 0 |
+| Roblox Studio | No requerido |
+| GitHub | Publicación executor externa |

@@ -1,3321 +1,2098 @@
-RAGNAROK_VERSION = "3.0.0"
-RAGNAROK_BUILD = "2026.08-R3"
+RAGNAROK_VERSION = "3.1.0-EXECUTOR"
 RAGNAROK_ALIVE = true
 RAGNAROK_START = os.clock()
-
-if getgenv then
-    local environment = getgenv()
-    if type(environment.RagnarokShutdown) == "function" then
-        pcall(environment.RagnarokShutdown)
+if type(getgenv) == "function" then
+    EXECUTOR_ENV = getgenv()
+    if type(EXECUTOR_ENV.RagnarokShutdown) == "function" then
+        pcall(EXECUTOR_ENV.RagnarokShutdown)
     end
-    environment.RagnarokVersion = RAGNAROK_VERSION
+    EXECUTOR_ENV.RagnarokVersion = RAGNAROK_VERSION
 end
-
+RAGNAROK_ALIVE = true
 UIS = game:GetService("UserInputService")
 HttpService = game:GetService("HttpService")
 Players = game:GetService("Players")
 CoreGui = game:GetService("CoreGui")
 RunService = game:GetService("RunService")
 TweenService = game:GetService("TweenService")
-GuiService = game:GetService("GuiService")
-StatsService = game:GetService("Stats")
+Camera = workspace.CurrentCamera
 LocalPlayer = Players.LocalPlayer
-Connections = {}
-Buckets = {}
-Controllers = {}
-PageRegistry = {}
-PageButtons = {}
-ControlRegistry = {}
-HitboxRegistry = {}
-Baseline = {
-    PlayerAttributes = {},
-    CharacterAttributes = {},
-    Character = nil,
-    WalkSpeed = nil,
-    JumpPower = nil,
-    JumpHeight = nil,
-    FieldOfView = 70,
-}
-Runtime = {
-    ActivePage = "dashboard",
-    SearchQuery = "",
-    NotificationQueue = {},
-    ActiveNotifications = 0,
-    PendingBinding = nil,
-    Dragging = false,
-    LastHitboxScan = 0,
-    LastStatsApply = 0,
-    LastMetricUpdate = 0,
-    LastFovUpdate = 0,
-    FrameRate = 60,
-    AntiAfkRunning = false,
-    ShutdownReason = nil,
-    DashboardRefresh = nil,
-    StatusLabel = nil,
-    FooterLabel = nil,
-    MetricLabels = {},
-    FeatureLabels = {},
-    SessionHistory = {},
-    LastAutosave = 0,
-    StateRevision = 0,
-}
-ApplyLayoutMode = nil
-OpenCommandPalette = nil
-CloseCommandPalette = nil
-ExecuteV3Command = nil
-RecordSessionEvent = nil
-PublishState = nil
-V3RunScheduler = nil
-UpdateV3Diagnostics = nil
-V3SwitchProfile = nil
-V3Commands = nil
-V3Scheduler = {}
 
-function SafeCall(callback, ...)
+function Protect(Instance)
+    if type(gethui) == "function" then
+        local success = pcall(function()
+            Instance.Parent = gethui()
+        end)
+        if success then
+            return true
+        end
+    end
+    if syn and type(syn.protect_gui) == "function" then
+        pcall(function()
+            syn.protect_gui(Instance)
+        end)
+    end
+    local success = pcall(function()
+        Instance.Parent = CoreGui
+    end)
+    return success
+end
+
+for _, v in ipairs(CoreGui:GetChildren()) do
+    if v.Name == "RagnarokHub" or v.Name == "RagnarokNotify" then
+        v:Destroy()
+    end
+end
+
+Config = {
+    HitboxScale = 6,
+    HitboxEnabled = true,
+    DirectionalJump = true,
+    AirMoveEnabled = false,
+    AirMoveSpeed = 15,
+    AntiAFK = false,
+    StretchedRes = false,
+    IconPos = {1, -100, 1, -100},
+    Binds = {},
+    HitboxTransparency = 0.7,
+    HitboxColor = "Cyan",
+    HitboxRefreshRate = 0.08,
+    NormalFOV = 70,
+    StretchedFOV = 110,
+    AutoRotateEnabled = false,
+    ShowNotifications = true,
+    ToggleKey = "RightShift",
+    ShutdownKey = "None",
+}
+
+function SafeExecutorCall(callback, ...)
     if type(callback) ~= "function" then
         return false, nil
     end
     return pcall(callback, ...)
 end
-
-function SafeDestroy(instance)
-    if instance and instance.Parent then
-        pcall(function()
-            instance:Destroy()
-        end)
-    end
-end
-
-function Track(connection, bucket)
-    if connection then
-        table.insert(Connections, connection)
-        if bucket then
-            Buckets[bucket] = Buckets[bucket] or {}
-            table.insert(Buckets[bucket], connection)
-        end
-    end
-    return connection
-end
-
-function Disconnect(connection)
-    if connection then
-        pcall(function()
-            connection:Disconnect()
-        end)
-    end
-end
-
-function DisconnectBucket(bucket)
-    local list = Buckets[bucket]
-    if not list then
-        return
-    end
-    for _, connection in ipairs(list) do
-        Disconnect(connection)
-    end
-    Buckets[bucket] = {}
-end
-
-function DisconnectAll()
-    for _, connection in ipairs(Connections) do
-        Disconnect(connection)
-    end
-    Connections = {}
-    Buckets = {}
-end
-
-function Protect(instance)
-    if gethui then
-        local success = pcall(function()
-            instance.Parent = gethui()
-        end)
-        if success then
-            return instance
-        end
-    end
-    if syn and syn.protect_gui then
-        pcall(function()
-            syn.protect_gui(instance)
-        end)
-    end
-    instance.Parent = CoreGui
-    return instance
-end
-
-function RemovePreviousInstances()
-    local containers = {CoreGui}
-    if gethui then
-        local success, result = pcall(gethui)
-        if success and result then
-            table.insert(containers, result)
-        end
-    end
-    for _, container in ipairs(containers) do
-        for _, child in ipairs(container:GetChildren()) do
-            if child.Name == "RagnarokHub" or child.Name == "RagnarokNotify" or child.Name == "RagnarokIcon" then
-                SafeDestroy(child)
-            end
-        end
-    end
-end
-
-RemovePreviousInstances()
-
-ConfigDefaults = {
-    ConfigVersion = 3,
-    HitboxEnabled = true,
-    HitboxScale = 6,
-    HitboxTransparency = 0.72,
-    HitboxColor = "Cyan",
-    DirectionalJump = true,
-    AirMoveEnabled = false,
-    AirMoveSpeed = 15,
-    AirMoveVertical = false,
-    AntiAFK = false,
-    StretchedRes = false,
-    StretchedFOV = 110,
-    NormalFOV = 70,
-    AutoRotateEnabled = false,
-    PowerfulServeEnabled = false,
-    EnableStatChangers = false,
-    DiveSpeed = 1,
-    SpikePower = 1,
-    TiltPower = 1,
-    SpeedMult = 1,
-    SetPower = 1,
-    ServePower = 1,
-    JumpPowerMult = 1,
-    BumpPower = 1,
-    BlockPower = 1,
-    Notifications = true,
-    NotificationDuration = 3,
-    HideIcon = false,
-    CompactMode = false,
-    PerformanceMode = false,
-    ShowMetrics = true,
-    SaveOnChange = true,
-    ToggleUIKey = "RightShift",
-    ResetKey = "None",
-    ServeKey = "Z",
-    WindowPosition = {0.5, 0, 0.5, 0},
-    IconPos = {1, -90, 1, -90},
-    Binds = {},
-    ActiveProfile = "alpha",
-    LayoutMode = "standard",
-    CommandPaletteKey = "F2",
-    AutoSaveInterval = 18,
-    SessionHistoryLimit = 80,
-}
-
-Config = {}
-for key, value in pairs(ConfigDefaults) do
-    if type(value) == "table" then
-        Config[key] = {}
-        for nestedKey, nestedValue in pairs(value) do
-            Config[key][nestedKey] = nestedValue
-        end
-    else
-        Config[key] = value
-    end
-end
-
-ConfigSchema = {
-    HitboxEnabled = {kind = "boolean"},
-    HitboxScale = {kind = "number", min = 1, max = 24},
-    HitboxTransparency = {kind = "number", min = 0.1, max = 0.95},
-    DirectionalJump = {kind = "boolean"},
-    AirMoveEnabled = {kind = "boolean"},
-    AirMoveSpeed = {kind = "number", min = 1, max = 120},
-    AirMoveVertical = {kind = "boolean"},
-    AntiAFK = {kind = "boolean"},
-    StretchedRes = {kind = "boolean"},
-    StretchedFOV = {kind = "number", min = 70, max = 130},
-    NormalFOV = {kind = "number", min = 50, max = 120},
-    AutoRotateEnabled = {kind = "boolean"},
-    PowerfulServeEnabled = {kind = "boolean"},
-    EnableStatChangers = {kind = "boolean"},
-    DiveSpeed = {kind = "number", min = 0, max = 5},
-    SpikePower = {kind = "number", min = 0, max = 500},
-    TiltPower = {kind = "number", min = 0, max = 500},
-    SpeedMult = {kind = "number", min = 0.25, max = 2},
-    SetPower = {kind = "number", min = 0, max = 500},
-    ServePower = {kind = "number", min = 0, max = 500},
-    JumpPowerMult = {kind = "number", min = 0, max = 5},
-    BumpPower = {kind = "number", min = 0, max = 500},
-    BlockPower = {kind = "number", min = 0, max = 500},
-    Notifications = {kind = "boolean"},
-    NotificationDuration = {kind = "number", min = 1, max = 8},
-    HideIcon = {kind = "boolean"},
-    CompactMode = {kind = "boolean"},
-    PerformanceMode = {kind = "boolean"},
-    ShowMetrics = {kind = "boolean"},
-    SaveOnChange = {kind = "boolean"},
-    ToggleUIKey = {kind = "string"},
-    ResetKey = {kind = "string"},
-    ServeKey = {kind = "string"},
-    HitboxColor = {kind = "string"},
-    ActiveProfile = {kind = "string"},
-    LayoutMode = {kind = "string"},
-    CommandPaletteKey = {kind = "string"},
-    AutoSaveInterval = {kind = "number", min = 5, max = 300},
-    SessionHistoryLimit = {kind = "number", min = 20, max = 200},
-}
-
-function DeepCopy(value)
-    if type(value) ~= "table" then
-        return value
-    end
-    local copy = {}
-    for key, nestedValue in pairs(value) do
-        copy[key] = DeepCopy(nestedValue)
-    end
-    return copy
-end
-
-function ClampNumber(value, minimum, maximum)
-    local number = tonumber(value)
-    if not number then
-        return nil
-    end
-    return math.clamp(number, minimum, maximum)
-end
-
-function NormalizeValue(key, value)
-    local schema = ConfigSchema[key]
-    if not schema then
-        return nil
-    end
-    if schema.kind == "boolean" then
-        return value == true
-    end
-    if schema.kind == "number" then
-        local result = ClampNumber(value, schema.min, schema.max)
-        return result
-    end
-    if schema.kind == "string" then
-        if type(value) ~= "string" then
-            return nil
-        end
-        return value
-    end
-    return nil
-end
-
-function NormalizeConfig(data)
-    if type(data) ~= "table" then
-        return
-    end
-    for key, defaultValue in pairs(ConfigDefaults) do
-        local value = data[key]
-        if key == "Binds" then
-            if type(value) == "table" then
-                Config.Binds = {}
-                for bindKey, bindValue in pairs(value) do
-                    if type(bindKey) == "string" and type(bindValue) == "string" then
-                        Config.Binds[bindKey] = bindValue
-                    end
-                end
-            end
-        elseif key == "IconPos" or key == "WindowPosition" then
-            if type(value) == "table" then
-                local position = {}
-                for index = 1, 4 do
-                    position[index] = tonumber(value[index]) or defaultValue[index]
-                end
-                Config[key] = position
-            end
-        else
-            local normalized = NormalizeValue(key, value)
-            if normalized ~= nil then
-                Config[key] = normalized
-            end
-        end
-    end
-    Config.ConfigVersion = 3
-end
-
-function GetConfigPath(profile)
-    local selected = profile or Config.ActiveProfile or "alpha"
-    return "RagnarokHub/v3/" .. tostring(selected) .. ".json"
-end
-
-function GetLegacyConfigPath()
-    return "RagnarokHub/v2/config.json"
-end
-
-function EnsureConfigFolder()
-    if not makefolder then
-        return
-    end
-    if isfolder and not isfolder("RagnarokHub") then
-        pcall(function()
-            makefolder("RagnarokHub")
-        end)
-    end
-    if isfolder and not isfolder("RagnarokHub/v2") then
-        pcall(function()
-            makefolder("RagnarokHub/v2")
-        end)
-    end
-    if isfolder and not isfolder("RagnarokHub/v3") then
-        pcall(function()
-            makefolder("RagnarokHub/v3")
-        end)
-    end
-end
-
-function SaveConfig(silent, profile)
-    EnsureConfigFolder()
-    if not writefile then
+function SaveConfig()
+    if type(writefile) ~= "function" then
         return false
     end
-    local selected = profile or Config.ActiveProfile or "alpha"
-    local values = DeepCopy(Config)
-    values.ActiveProfile = selected
-    local payload = {
-        ConfigVersion = 3,
-        SavedAt = os.time(),
-        Profile = selected,
-        Values = values,
-    }
     local success = pcall(function()
-        writefile(GetConfigPath(selected), HttpService:JSONEncode(payload))
+        writefile("RagnarokConfig.json", HttpService:JSONEncode(Config))
     end)
-    if success and not silent then
-        return true
-    end
     return success
 end
-
-function LoadConfig(silent, profile)
-    local selected = profile or Config.ActiveProfile or "alpha"
-    local path = GetConfigPath(selected)
-    local legacyPath = GetLegacyConfigPath()
-    if not isfile or not readfile then
+function LoadConfig()
+    if type(isfile) ~= "function" or type(readfile) ~= "function" or not isfile("RagnarokConfig.json") then
         return false
     end
-    if not isfile(path) and selected ~= "alpha" then
-        return false
-    end
-    if not isfile(path) and not isfile(legacyPath) then
-        return false
-    end
-    local sourcePath = isfile(path) and path or legacyPath
-    local success, decoded = pcall(function()
-        return HttpService:JSONDecode(readfile(sourcePath))
+    local success, data = pcall(function()
+        return HttpService:JSONDecode(readfile("RagnarokConfig.json"))
     end)
-    if not success or type(decoded) ~= "table" then
+    if not success or type(data) ~= "table" then
         return false
     end
-    local values = decoded.Values or decoded
-    NormalizeConfig(values)
-    Config.ActiveProfile = selected
-    Config.ConfigVersion = 3
+    for k, v in pairs(data) do
+        if Config[k] ~= nil and type(v) == type(Config[k]) then
+            Config[k] = v
+        end
+    end
     return true
 end
 
-function ResetConfig(silent)
-    local activeProfile = Config.ActiveProfile
-    for key, value in pairs(ConfigDefaults) do
-        Config[key] = DeepCopy(value)
-    end
-    if activeProfile then
-        Config.ActiveProfile = activeProfile
-    end
-    if not silent then
-        SaveConfig(true)
-    end
-end
 
-LoadConfig(true)
+LoadConfig()
+ControlRegistry = {}
+InputConnections = {}
 
-Palette = {
-    Background = Color3.fromRGB(7, 9, 13),
-    Surface = Color3.fromRGB(12, 15, 21),
-    SurfaceRaised = Color3.fromRGB(17, 21, 28),
-    SurfaceHover = Color3.fromRGB(23, 29, 38),
-    Border = Color3.fromRGB(38, 47, 60),
-    BorderStrong = Color3.fromRGB(61, 77, 96),
-    Text = Color3.fromRGB(239, 244, 249),
-    TextMuted = Color3.fromRGB(148, 161, 177),
-    TextDim = Color3.fromRGB(91, 105, 122),
-    Accent = Color3.fromRGB(34, 211, 238),
-    AccentStrong = Color3.fromRGB(8, 145, 178),
-    AccentSoft = Color3.fromRGB(18, 57, 71),
-    Success = Color3.fromRGB(52, 211, 153),
-    Warning = Color3.fromRGB(251, 191, 36),
-    Danger = Color3.fromRGB(248, 113, 113),
-    Violet = Color3.fromRGB(167, 139, 250),
-    White = Color3.fromRGB(255, 255, 255),
-}
+NotifyGui = Instance.new("ScreenGui")
+NotifyGui.Name = "RagnarokNotify"
+NotifyGui.DisplayOrder = 100
+Protect(NotifyGui)
 
-function AccentColor()
-    if Config.HitboxColor == "Violet" then
-        return Palette.Violet
-    end
-    if Config.HitboxColor == "Green" then
-        return Palette.Success
-    end
-    if Config.HitboxColor == "Amber" then
-        return Palette.Warning
-    end
-    return Palette.Accent
-end
+NotifyList = Instance.new("Frame")
+NotifyList.Size = UDim2.new(0, 280, 1, 0)
+NotifyList.Position = UDim2.new(0, 20, 0, 20)
+NotifyList.BackgroundTransparency = 1
+NotifyList.Parent = NotifyGui
 
-function CreateInstance(className, properties, parent)
-    local instance = Instance.new(className)
-    for property, value in pairs(properties or {}) do
-        pcall(function()
-            instance[property] = value
+notifyQueue = {}
+activeNotifs = 0
+
+function ProcessQueue()
+    if not RAGNAROK_ALIVE or not NotifyGui.Parent then
+        notifyQueue = {}
+        return
+    end
+    if #notifyQueue > 0 and activeNotifs < 5 then
+        local data = table.remove(notifyQueue, 1)
+        activeNotifs = activeNotifs + 1
+
+        local nFrame = Instance.new("Frame")
+        nFrame.Size = UDim2.new(1, 0, 0, 45)
+        nFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
+        nFrame.Position = UDim2.new(-1.2, 0, 0, (activeNotifs - 1) * 50)
+        nFrame.Parent = NotifyList
+        Instance.new("UICorner", nFrame).CornerRadius = UDim.new(0, 6)
+        local ns = Instance.new("UIStroke", nFrame)
+        ns.Color = Color3.fromRGB(45, 45, 50)
+        ns.Thickness = 1.5
+
+        local nText = Instance.new("TextLabel")
+        nText.Size = UDim2.new(1, -20, 1, 0)
+        nText.Position = UDim2.new(0, 10, 0, 0)
+        nText.BackgroundTransparency = 1
+        nText.Font = Enum.Font.GothamMedium
+        nText.RichText = true
+        nText.Text = data.msg
+        nText.TextColor3 = Color3.fromRGB(230, 230, 230)
+        nText.TextSize = 14
+        nText.TextXAlignment = Enum.TextXAlignment.Left
+        nText.Parent = nFrame
+
+        TweenService:Create(nFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, nFrame.Position.Y.Offset)}):Play()
+
+        task.delay(2.5, function()
+            TweenService:Create(nFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Position = UDim2.new(-1.2, 0, 0, nFrame.Position.Y.Offset)}):Play()
+            task.wait(0.4)
+            nFrame:Destroy()
+            activeNotifs = activeNotifs - 1
+            ProcessQueue()
         end)
     end
-    if parent then
-        instance.Parent = parent
+end
+
+function Notify(name, state)
+    if Config and Config.ShowNotifications == false then
+        return
     end
-    return instance
+    local statusText = state and '<font color="#00FF7F">Activated</font>' or '<font color="#FF4500">Deactivated</font>'
+    table.insert(notifyQueue, {msg = name .. ": " .. statusText})
+    ProcessQueue()
 end
 
-function AddCorner(parent, radius)
-    return CreateInstance("UICorner", {CornerRadius = UDim.new(0, radius or 8)}, parent)
-end
+Ragnarok = Instance.new("ScreenGui")
+Ragnarok.Name = "RagnarokHub"
+Ragnarok.ResetOnSpawn = false
+Ragnarok.DisplayOrder = 10
+Protect(Ragnarok)
 
-function AddStroke(parent, color, thickness, transparency)
-    return CreateInstance("UIStroke", {
-        Color = color or Palette.Border,
-        Thickness = thickness or 1,
-        Transparency = transparency or 0,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, parent)
-end
+Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Parent = Ragnarok
+Main.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+Main.Position = UDim2.new(0.5, -200, 0.5, -250)
+Main.Size = UDim2.new(0, 400, 0, 0)
+Main.AutomaticSize = Enum.AutomaticSize.Y
+Main.Visible = false
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+MainStroke = Instance.new("UIStroke", Main)
+MainStroke.Color = Color3.fromRGB(0, 191, 255)
+MainStroke.Thickness = 2
+MainStroke.Transparency = 0.6
 
-function AddPadding(parent, left, right, top, bottom)
-    return CreateInstance("UIPadding", {
-        PaddingLeft = UDim.new(0, left or 0),
-        PaddingRight = UDim.new(0, right or 0),
-        PaddingTop = UDim.new(0, top or 0),
-        PaddingBottom = UDim.new(0, bottom or 0),
-    }, parent)
-end
+Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 50)
+Header.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+Header.Parent = Main
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 12)
 
-function AddList(parent, padding, horizontal)
-    return CreateInstance("UIListLayout", {
-        Padding = UDim.new(0, padding or 0),
-        FillDirection = horizontal and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        HorizontalAlignment = Enum.HorizontalAlignment.Left,
-        VerticalAlignment = Enum.VerticalAlignment.Top,
-    }, parent)
-end
+Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -120, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.Text = "RAGNAROK HUB"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
 
-function AddGradient(parent, first, second, rotation)
-    return CreateInstance("UIGradient", {
-        Color = ColorSequence.new(first, second),
-        Rotation = rotation or 0,
-    }, parent)
-end
+TitleGradient = Instance.new("UIGradient")
+TitleGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 191, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 191, 255))
+})
+TitleGradient.Parent = Title
 
-function Tween(instance, duration, properties, style, direction)
-    if not instance then
-        return nil
+task.spawn(function()
+    while RAGNAROK_ALIVE and TitleGradient.Parent do
+        local t = TweenService:Create(TitleGradient, TweenInfo.new(3, Enum.EasingStyle.Linear), {Offset = Vector2.new(1, 0)})
+        t:Play()
+        t.Completed:Wait()
+        TitleGradient.Offset = Vector2.new(-1, 0)
     end
-    local animation = TweenService:Create(instance, TweenInfo.new(
-        duration or 0.2,
-        style or Enum.EasingStyle.Quart,
-        direction or Enum.EasingDirection.Out
-    ), properties)
-    animation:Play()
-    return animation
+end)
+
+function CreateHeaderBtn(text, xOffset, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 30, 0, 30)
+    b.Position = UDim2.new(1, xOffset, 0.5, -15)
+    b.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    b.Font = Enum.Font.GothamBold
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.TextSize = 16
+    b.Parent = Header
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    b.MouseButton1Click:Connect(callback)
+    return b
 end
 
-function SetText(instance, text)
-    if instance then
-        instance.Text = tostring(text or "")
+function GetVisualColor()
+    if Config.HitboxColor == "Violet" then
+        return Color3.fromRGB(167, 139, 250)
+    end
+    if Config.HitboxColor == "Green" then
+        return Color3.fromRGB(52, 211, 153)
+    end
+    if Config.HitboxColor == "Amber" then
+        return Color3.fromRGB(251, 191, 36)
+    end
+    return Color3.fromRGB(0, 191, 255)
+end
+function ClearHitboxes()
+    for _, model in ipairs(workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            local visual = model:FindFirstChild("RagnarokHitbox")
+            if visual then
+                visual:Destroy()
+            end
+            local legacy = model:FindFirstChild("Ball.001")
+            if legacy and legacy:GetAttribute("RagnarokOwned") then
+                legacy:Destroy()
+            end
+        end
     end
 end
 
-function FormatNumber(value, decimals)
-    local number = tonumber(value) or 0
-    return string.format("%." .. tostring(decimals or 0) .. "f", number)
+CloseBtn = CreateHeaderBtn("X", -40, function()
+    local Prompt = Ragnarok:FindFirstChild("TerminationMenu")
+    if Prompt then Prompt.Visible = true end
+end)
+
+MinBtn = CreateHeaderBtn("M", -80, function()
+    Main.Visible = false
+    Ragnarok:FindFirstChild("Icon").Visible = true
+end)
+
+TabContainer = Instance.new("Frame")
+TabContainer.Size = UDim2.new(1, 0, 0, 35)
+TabContainer.Position = UDim2.new(0, 0, 0, 50)
+TabContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+TabContainer.Parent = Main
+
+TabList = Instance.new("UIListLayout")
+TabList.FillDirection = Enum.FillDirection.Horizontal
+TabList.Parent = TabContainer
+
+Pages = Instance.new("Frame")
+Pages.Size = UDim2.new(1, 0, 0, 0)
+Pages.AutomaticSize = Enum.AutomaticSize.Y
+Pages.Position = UDim2.new(0, 0, 0, 85)
+Pages.BackgroundTransparency = 1
+Pages.Parent = Main
+
+PageFrames = {}
+function CreatePage(name)
+    local Page = Instance.new("Frame")
+    Page.Size = UDim2.new(1, 0, 0, 0)
+    Page.AutomaticSize = Enum.AutomaticSize.Y
+    Page.BackgroundTransparency = 1
+    Page.Visible = false
+    Page.Parent = Pages
+
+    local Layout = Instance.new("UIListLayout")
+    Layout.Padding = UDim.new(0, 8)
+    Layout.Parent = Page
+
+    Instance.new("UIPadding", Page).PaddingLeft = UDim.new(0, 15)
+    Instance.new("UIPadding", Page).PaddingBottom = UDim.new(0, 20)
+
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Size = UDim2.new(0.25, 0, 1, 0)
+    TabBtn.BackgroundTransparency = 1
+    TabBtn.Font = Enum.Font.GothamBold
+    TabBtn.Text = name:upper()
+    TabBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    TabBtn.TextSize = 14
+    TabBtn.Parent = TabContainer
+
+    TabBtn.MouseButton1Click:Connect(function()
+        for _, p in pairs(PageFrames) do p.Page.Visible = false p.Btn.TextColor3 = Color3.fromRGB(150, 150, 150) end
+        Page.Visible = true
+        TabBtn.TextColor3 = Color3.fromRGB(0, 191, 255)
+    end)
+
+    PageFrames[name] = {Page = Page, Btn = TabBtn}
+    return Page
 end
 
-function FormatPercent(value)
-    return string.format("%d%%", math.floor((tonumber(value) or 0) * 100 + 0.5))
+MainPage = CreatePage("Main")
+MiscPage = CreatePage("Misc")
+PageFrames["Main"].Page.Visible = true
+PageFrames["Main"].Btn.TextColor3 = Color3.fromRGB(0, 191, 255)
+
+function CreateCategory(parent, name, iconId)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -30, 0, 35)
+    f.BackgroundTransparency = 1
+    f.Parent = parent
+
+    local i = Instance.new("ImageLabel")
+    i.Size = UDim2.new(0, 20, 0, 20)
+    i.Position = UDim2.new(0, 5, 0.5, -10)
+    i.BackgroundTransparency = 1
+    i.Image = "rbxassetid://" .. iconId
+    i.ImageColor3 = Color3.fromRGB(0, 191, 255)
+    i.Parent = f
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -45, 1, 0)
+    t.Position = UDim2.new(0, 35, 0, 0)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.Text = name:upper()
+    t.TextColor3 = Color3.fromRGB(130, 130, 140)
+    t.TextSize = 13
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = f
+
+    local l = Instance.new("Frame")
+    l.Size = UDim2.new(1, -t.TextBounds.X - 55, 0, 1)
+    l.Position = UDim2.new(0, t.TextBounds.X + 50, 0.5, 0)
+    l.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    l.BorderSizePixel = 0
+    l.Parent = f
 end
 
-function IsAlive()
-    return RAGNAROK_ALIVE
+Icon = Instance.new("TextButton")
+Icon.Name = "Icon"
+Icon.Parent = Ragnarok
+Icon.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+Icon.Position = UDim2.new(Config.IconPos[1], Config.IconPos[2], Config.IconPos[3], Config.IconPos[4])
+Icon.Size = UDim2.new(0, 50, 0, 50)
+Icon.Font = Enum.Font.GothamBlack
+Icon.Text = "R"
+Icon.TextColor3 = Color3.fromRGB(0, 191, 255)
+Icon.TextSize = 24
+Instance.new("UICorner", Icon).CornerRadius = UDim.new(1, 0)
+is = Instance.new("UIStroke", Icon)
+is.Color = Color3.fromRGB(0, 191, 255)
+is.Thickness = 2
+is.Transparency = 0.4
+
+function MakeDraggable(obj, target, isIcon)
+    local dragging, dragInput, dragStart, startPos
+    obj.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = target.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if isIcon then
+                        Config.IconPos = {target.Position.X.Scale, target.Position.X.Offset, target.Position.Y.Scale, target.Position.Y.Offset}
+                        SaveConfig()
+                    end
+                end
+            end)
+        end
+    end)
+    obj.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 end
 
-function GetCharacter()
+MakeDraggable(Header, Main, false)
+MakeDraggable(Icon, Icon, true)
+
+Icon.MouseButton1Click:Connect(function()
+    Main.Visible = true
+    Main.BackgroundTransparency = 1
+    TweenService:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundTransparency = 0}):Play()
+    Icon.Visible = false
+end)
+
+TerminationMenu = Instance.new("Frame")
+TerminationMenu.Name = "TerminationMenu"
+TerminationMenu.Size = UDim2.new(0, 340, 0, 300)
+TerminationMenu.Position = UDim2.new(0.5, -170, 0.5, -150)
+TerminationMenu.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
+TerminationMenu.Visible = false
+TerminationMenu.ZIndex = 5000
+TerminationMenu.Parent = Ragnarok
+Instance.new("UICorner", TerminationMenu).CornerRadius = UDim.new(0, 12)
+ts = Instance.new("UIStroke", TerminationMenu)
+ts.Color = Color3.fromRGB(0, 191, 255)
+ts.Thickness = 2
+
+THeader = Instance.new("Frame")
+THeader.Size = UDim2.new(1, 0, 0, 50)
+THeader.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+THeader.Parent = TerminationMenu
+THeader.ZIndex = 5001
+Instance.new("UICorner", THeader).CornerRadius = UDim.new(0, 12)
+
+TTitle = Instance.new("TextLabel")
+TTitle.Size = UDim2.new(1, 0, 1, 0)
+TTitle.BackgroundTransparency = 1
+TTitle.Font = Enum.Font.GothamBold
+TTitle.Text = "SYSTEM TERMINATION"
+TTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+TTitle.TextSize = 16
+TTitle.ZIndex = 5002
+TTitle.Parent = THeader
+
+TContent = Instance.new("TextLabel")
+TContent.Size = UDim2.new(1, -40, 0, 40)
+TContent.Position = UDim2.new(0, 20, 0, 60)
+TContent.BackgroundTransparency = 1
+TContent.Font = Enum.Font.GothamMedium
+TContent.Text = "Select an action to proceed with the script status management."
+TContent.TextColor3 = Color3.fromRGB(180, 180, 180)
+TContent.TextSize = 12
+TContent.TextWrapped = true
+TContent.ZIndex = 5001
+TContent.Parent = TerminationMenu
+
+function CreateTBtn(text, pos, color, callback)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -40, 0, 42)
+    b.Position = pos
+    b.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    b.Font = Enum.Font.GothamBold
+    b.Text = text
+    b.TextColor3 = color
+    b.TextSize = 13
+    b.ZIndex = 5002
+    b.Parent = TerminationMenu
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    local bs = Instance.new("UIStroke", b)
+    bs.Color = color
+    bs.Thickness = 1.5
+    bs.Transparency = 0.6
+    b.MouseButton1Click:Connect(callback)
+    b.MouseEnter:Connect(function() TweenService:Create(bs, TweenInfo.new(0.2), {Transparency = 0}):Play() end)
+    b.MouseLeave:Connect(function() TweenService:Create(bs, TweenInfo.new(0.2), {Transparency = 0.6}):Play() end)
+end
+
+CreateTBtn("SHUTDOWN SCRIPT", UDim2.new(0, 20, 0, 110), Color3.fromRGB(255, 70, 70), function()
+    FullShutdown("menu")
+end)
+
+CreateTBtn("MINIMIZE TO ICON", UDim2.new(0, 20, 0, 160), Color3.fromRGB(0, 191, 255), function()
+    TerminationMenu.Visible = false
+    Main.Visible = false
+    Icon.Visible = true
+end)
+
+CreateTBtn("STEALTH MODE", UDim2.new(0, 20, 0, 210), Color3.fromRGB(200, 200, 200), function()
+    FullShutdown("stealth")
+end)
+
+TCancel = Instance.new("TextButton")
+TCancel.Size = UDim2.new(0, 100, 0, 30)
+TCancel.Position = UDim2.new(0.5, -50, 1, -35)
+TCancel.BackgroundTransparency = 1
+TCancel.Font = Enum.Font.GothamBold
+TCancel.Text = "DISMISS"
+TCancel.TextColor3 = Color3.fromRGB(100, 100, 100)
+TCancel.TextSize = 12
+TCancel.ZIndex = 5002
+TCancel.Parent = TerminationMenu
+TCancel.MouseButton1Click:Connect(function() TerminationMenu.Visible = false end)
+
+function CreateToggle(parent, name, configKey)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -30, 0, 42)
+    f.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    f.Parent = parent
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -130, 1, 0)
+    t.Position = UDim2.new(0, 15, 0, 0)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamMedium
+    t.Text = name
+    t.TextColor3 = Color3.fromRGB(220, 220, 220)
+    t.TextSize = 14
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = f
+
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 36, 0, 18)
+    b.Position = UDim2.new(1, -50, 0.5, -9)
+    b.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0, 191, 255) or Color3.fromRGB(40, 40, 45)
+    b.Text = ""
+    b.Parent = f
+    Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
+
+    local ind = Instance.new("Frame")
+    ind.Size = UDim2.new(0, 14, 0, 14)
+    ind.Position = Config[configKey] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    ind.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    ind.Parent = b
+    Instance.new("UICorner", ind).CornerRadius = UDim.new(1, 0)
+
+    local bind = Instance.new("TextButton")
+    bind.Size = UDim2.new(0, 60, 0, 22)
+    bind.Position = UDim2.new(1, -115, 0.5, -11)
+    bind.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    bind.Font = Enum.Font.GothamBold
+    bind.Text = Config.Binds[configKey] or "NONE"
+    bind.TextColor3 = Color3.fromRGB(0, 191, 255)
+    bind.TextSize = 11
+    bind.Parent = f
+    Instance.new("UICorner", bind).CornerRadius = UDim.new(0, 4)
+
+    local function Toggle()
+        if not RAGNAROK_ALIVE then
+            return
+        end
+        Config[configKey] = not Config[configKey]
+        if configKey == "HitboxEnabled" and not Config[configKey] then ClearHitboxes() end
+        if ControlRegistry[configKey] then
+            ControlRegistry[configKey]()
+        end
+        Notify(name, Config[configKey])
+        SaveConfig()
+    end
+    ControlRegistry[configKey] = function()
+        local enabled = Config[configKey] == true
+        b.BackgroundColor3 = enabled and Color3.fromRGB(0, 191, 255) or Color3.fromRGB(40, 40, 45)
+        ind.Position = enabled and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    end
+
+    b.MouseButton1Click:Connect(Toggle)
+
+    local binding = false
+    bind.MouseButton1Click:Connect(function()
+        binding = true
+        bind.Text = "..."
+        local connection
+        connection = UIS.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Keyboard then
+                local k = i.KeyCode.Name
+                if k == "Backspace" then
+                    Config.Binds[configKey] = nil
+                    bind.Text = "NONE"
+                else
+                    Config.Binds[configKey] = k
+                    bind.Text = k
+                end
+                binding = false
+                SaveConfig()
+                connection:Disconnect()
+            end
+        end)
+    end)
+
+    UIS.InputBegan:Connect(function(i, g)
+        if not g and not binding and Config.Binds[configKey] and i.KeyCode.Name == Config.Binds[configKey] then
+            Toggle()
+        end
+    end)
+end
+
+function CreateSlider(parent, name, min, max, configKey)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -30, 0, 55)
+    f.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    f.Parent = parent
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -80, 0, 25)
+    t.Position = UDim2.new(0, 15, 0, 5)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.Text = name
+    t.TextColor3 = Color3.fromRGB(220, 220, 220)
+    t.TextSize = 13
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Parent = f
+
+    local v = Instance.new("TextLabel")
+    v.Size = UDim2.new(0, 70, 0, 25)
+    v.Position = UDim2.new(1, -85, 0, 5)
+    v.BackgroundTransparency = 1
+    v.Font = Enum.Font.GothamBold
+    v.Text = string.format("%.1f", Config[configKey])
+    v.TextColor3 = Color3.fromRGB(0, 191, 255)
+    v.TextSize = 13
+    v.TextXAlignment = Enum.TextXAlignment.Right
+    v.Parent = f
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, -30, 0, 8)
+    bar.Position = UDim2.new(0, 15, 0, 38)
+    bar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    bar.Parent = f
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((Config[configKey] - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 191, 255)
+    fill.Parent = bar
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+    local dragging = false
+    local function Update(input)
+        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local val = tonumber(string.format("%.1f", min + (max - min) * pos))
+        fill.Size = UDim2.new(pos, 0, 1, 0)
+        v.Text = tostring(val)
+        Config[configKey] = val
+        SaveConfig()
+    end
+
+    ControlRegistry[configKey] = function()
+        local current = tonumber(Config[configKey]) or min
+        local alpha = math.clamp((current - min) / (max - min), 0, 1)
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        v.Text = string.format("%.1f", current)
+    end
+    bar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true Update(i) end end)
+    UIS.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then Update(i) end end)
+    UIS.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+end
+
+CreateCategory(MainPage, "Game", "7733993211")
+CreateToggle(MainPage, "Hitbox Enabled", "HitboxEnabled")
+CreateSlider(MainPage, "Hitbox Scale", 1.0, 20.5, "HitboxScale")
+
+CreateCategory(MainPage, "Movement", "7743871002")
+CreateToggle(MainPage, "Directional Jump", "DirectionalJump")
+CreateToggle(MainPage, "Air Move", "AirMoveEnabled")
+CreateSlider(MainPage, "Air Move Speed", 10, 100, "AirMoveSpeed")
+CreateToggle(MainPage, "Auto Rotate", "AutoRotateEnabled")
+
+CreateCategory(MiscPage, "Player", "7733715400")
+CreateToggle(MiscPage, "Anti AFK", "AntiAFK")
+
+CreateCategory(MiscPage, "Visuals", "7733978098")
+CreateToggle(MiscPage, "Stretched Res", "StretchedRes")
+CreateToggle(MiscPage, "Notifications", "ShowNotifications")
+CreateSlider(MiscPage, "Hitbox Transparency", 0.1, 0.9, "HitboxTransparency")
+CreateSlider(MiscPage, "Normal FOV", 50, 120, "NormalFOV")
+CreateSlider(MiscPage, "Stretched FOV", 70, 130, "StretchedFOV")
+
+LastHitboxUpdate = 0
+function CreateHitboxes(scale)
+    local now = os.clock()
+    if now - LastHitboxUpdate < math.max(0.03, tonumber(Config.HitboxRefreshRate) or 0.08) then
+        return
+    end
+    LastHitboxUpdate = now
+    for _, model in ipairs(workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            local reference = nil
+            for _, part in ipairs(model:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "RagnarokHitbox" then
+                    reference = part
+                    break
+                end
+            end
+            if reference then
+                local visual = model:FindFirstChild("RagnarokHitbox")
+                if not visual then
+                    visual = Instance.new("Part")
+                    visual.Name = "RagnarokHitbox"
+                    visual.Shape = Enum.PartType.Ball
+                    visual.Anchored = true
+                    visual.CanCollide = false
+                    visual.CanTouch = false
+                    visual.CanQuery = false
+                    visual.CastShadow = false
+                    visual.Material = Enum.Material.ForceField
+                    visual.Parent = model
+                end
+                visual.Size = Vector3.new(scale, scale, scale)
+                visual.CFrame = reference.CFrame
+                visual.Transparency = math.clamp(tonumber(Config.HitboxTransparency) or 0.7, 0.1, 0.95)
+                visual.Color = GetVisualColor()
+            end
+        end
+    end
+end
+
+JumpConnection = UIS.JumpRequest:Connect(function()
+    if not RAGNAROK_ALIVE then
+        return
+    end
+    local char = LocalPlayer.Character
+    if Config.DirectionalJump and char then
+        local hum = char:FindFirstChild("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hum and hrp then
+            task.defer(function()
+                task.wait(0.03)
+                local dir = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z)
+                if dir.Magnitude > 0 then
+                    hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + dir.Unit)
+                    hum.AutoRotate = false
+                end
+            end)
+        end
+    end
+end)
+
+antiAfkActive = false
+
+function GetCameraSafe()
+    Camera = workspace.CurrentCamera or Camera
+    return Camera
+end
+function GetCharacterSafe()
     return LocalPlayer and LocalPlayer.Character or nil
 end
-
-function GetHumanoid(character)
-    local target = character or GetCharacter()
-    return target and target:FindFirstChildOfClass("Humanoid") or nil
+function GetHumanoidSafe(character)
+    local target = character or GetCharacterSafe()
+    if not target then
+        return nil
+    end
+    return target:FindFirstChildOfClass("Humanoid") or target:FindFirstChild("Humanoid")
 end
-
-function GetRoot(character)
-    local target = character or GetCharacter()
+function GetRootSafe(character)
+    local target = character or GetCharacterSafe()
     return target and target:FindFirstChild("HumanoidRootPart") or nil
 end
-
-function GetCamera()
-    return workspace.CurrentCamera
-end
-
-function GetPlayerPing()
-    local success, value = pcall(function()
-        return LocalPlayer:GetNetworkPing() * 1000
-    end)
-    if success then
-        return math.floor(value + 0.5)
+function ApplyCameraSettings()
+    local camera = GetCameraSafe()
+    if camera then
+        camera.FieldOfView = Config.StretchedRes and Config.StretchedFOV or Config.NormalFOV
     end
-    return 0
 end
-
-function GetMemoryUsage()
-    local success, value = pcall(function()
-        return StatsService:GetTotalMemoryUsageMb()
-    end)
-    if success then
-        return math.floor(value + 0.5)
-    end
-    return 0
-end
-
-function GetFps()
-    return math.floor((Runtime.FrameRate or 0) + 0.5)
-end
-
-function RegisterController(name, startCallback, stopCallback, refreshCallback)
-    Controllers[name] = {
-        Active = false,
-        Start = startCallback,
-        Stop = stopCallback,
-        Refresh = refreshCallback,
-    }
-end
-
-function SetController(name, enabled)
-    local controller = Controllers[name]
-    if not controller then
-        return false
-    end
-    local target = enabled == true
-    if controller.Active == target then
-        if controller.Refresh then
-            SafeCall(controller.Refresh, target)
+function RefreshAllControls()
+    for _, refresh in pairs(ControlRegistry) do
+        if type(refresh) == "function" then
+            pcall(refresh)
         end
-        return true
     end
-    controller.Active = target
-    if target then
-        SafeCall(controller.Start)
-    else
-        SafeCall(controller.Stop)
+    ApplyCameraSettings()
+end
+function RestoreDefaults()
+    local preservedPosition = Config.IconPos
+    Config = {
+        HitboxScale = 6,
+        HitboxEnabled = true,
+        DirectionalJump = true,
+        AirMoveEnabled = false,
+        AirMoveSpeed = 15,
+        AntiAFK = false,
+        StretchedRes = false,
+        IconPos = preservedPosition or {1, -100, 1, -100},
+        Binds = {},
+        HitboxTransparency = 0.7,
+        HitboxColor = "Cyan",
+        HitboxRefreshRate = 0.08,
+        NormalFOV = 70,
+        StretchedFOV = 110,
+        AutoRotateEnabled = false,
+        ShowNotifications = true,
+        ToggleKey = "RightShift",
+        ShutdownKey = "None",
+    }
+    ClearHitboxes()
+    RefreshAllControls()
+    SaveConfig()
+end
+function FullShutdown(reason)
+    if not RAGNAROK_ALIVE then
+        return
     end
-    return true
+    RAGNAROK_ALIVE = false
+    ShutdownReason = reason or "manual"
+    ClearHitboxes()
+    local camera = GetCameraSafe()
+    if camera then
+        camera.FieldOfView = Config.NormalFOV or 70
+    end
+    Config.HitboxEnabled = false
+    Config.AntiAFK = false
+    Config.AirMoveEnabled = false
+    Config.DirectionalJump = false
+    local humanoid = GetHumanoidSafe()
+    if humanoid then
+        humanoid.AutoRotate = true
+    end
+    if Ragnarok and Ragnarok.Parent then
+        Ragnarok:Destroy()
+    end
+    if NotifyGui and NotifyGui.Parent then
+        NotifyGui:Destroy()
+    end
+    if JumpConnection then
+        pcall(function()
+            JumpConnection:Disconnect()
+        end)
+        JumpConnection = nil
+    end
+    DisconnectRuntimeConnections()
+    if type(getgenv) == "function" then
+        local environment = getgenv()
+        if environment.RagnarokShutdown then
+            environment.RagnarokShutdown = nil
+        end
+    end
 end
-
-function IsControllerActive(name)
-    local controller = Controllers[name]
-    return controller and controller.Active == true or false
+function ToggleMain()
+    if not RAGNAROK_ALIVE then
+        return
+    end
+    Main.Visible = not Main.Visible
+    Icon.Visible = not Main.Visible
+    if Main.Visible then
+        Main.BackgroundTransparency = 1
+        TweenService:Create(Main, TweenInfo.new(0.24, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundTransparency = 0}):Play()
+    end
 end
-
-function CountActiveControllers()
+function SetBinding(configKey, displayButton)
+    displayButton.Text = "..."
+    local bindingConnection
+    bindingConnection = UIS.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then
+            return
+        end
+        local keyName = input.KeyCode.Name
+        if keyName == "Backspace" or keyName == "Escape" then
+            Config[configKey] = "None"
+        else
+            Config[configKey] = keyName
+        end
+        displayButton.Text = tostring(Config[configKey] or "None")
+        SaveConfig()
+        if bindingConnection then
+            bindingConnection:Disconnect()
+        end
+    end)
+end
+function CreateActionButton(parent, text, color, callback, order)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, -30, 0, 42)
+    button.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    button.Font = Enum.Font.GothamBold
+    button.Text = text
+    button.TextColor3 = color
+    button.TextSize = 12
+    button.LayoutOrder = order or 1
+    button.Parent = parent
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+    local stroke = Instance.new("UIStroke", button)
+    stroke.Color = color
+    stroke.Thickness = 1.2
+    stroke.Transparency = 0.55
+    button.MouseButton1Click:Connect(callback)
+    button.MouseEnter:Connect(function()
+        TweenService:Create(stroke, TweenInfo.new(0.16), {Transparency = 0}):Play()
+    end)
+    button.MouseLeave:Connect(function()
+        TweenService:Create(stroke, TweenInfo.new(0.16), {Transparency = 0.55}):Play()
+    end)
+    return button
+end
+function CreateInfoRow(parent, label, value, order)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -30, 0, 38)
+    row.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    row.LayoutOrder = order or 1
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    local left = Instance.new("TextLabel")
+    left.Size = UDim2.new(0.58, 0, 1, 0)
+    left.Position = UDim2.new(0, 14, 0, 0)
+    left.BackgroundTransparency = 1
+    left.Font = Enum.Font.GothamMedium
+    left.Text = label
+    left.TextColor3 = Color3.fromRGB(180, 180, 190)
+    left.TextSize = 12
+    left.TextXAlignment = Enum.TextXAlignment.Left
+    left.Parent = row
+    local right = Instance.new("TextLabel")
+    right.Size = UDim2.new(0.38, -14, 1, 0)
+    right.Position = UDim2.new(0.62, 0, 0, 0)
+    right.BackgroundTransparency = 1
+    right.Font = Enum.Font.GothamBold
+    right.Text = tostring(value)
+    right.TextColor3 = Color3.fromRGB(0, 191, 255)
+    right.TextSize = 11
+    right.TextXAlignment = Enum.TextXAlignment.Right
+    right.Parent = row
+    return row, right
+end
+function CreateKeybindRow(parent, label, configKey, order)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -30, 0, 42)
+    row.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    row.LayoutOrder = order or 1
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, -120, 1, 0)
+    text.Position = UDim2.new(0, 14, 0, 0)
+    text.BackgroundTransparency = 1
+    text.Font = Enum.Font.GothamMedium
+    text.Text = label
+    text.TextColor3 = Color3.fromRGB(220, 220, 220)
+    text.TextSize = 12
+    text.TextXAlignment = Enum.TextXAlignment.Left
+    text.Parent = row
+    local key = Instance.new("TextButton")
+    key.Size = UDim2.new(0, 82, 0, 26)
+    key.Position = UDim2.new(1, -96, 0.5, -13)
+    key.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    key.Font = Enum.Font.GothamBold
+    key.Text = tostring(Config[configKey] or "None")
+    key.TextColor3 = Color3.fromRGB(0, 191, 255)
+    key.TextSize = 10
+    key.Parent = row
+    Instance.new("UICorner", key).CornerRadius = UDim.new(0, 5)
+    key.MouseButton1Click:Connect(function()
+        SetBinding(configKey, key)
+    end)
+    return row
+end
+function CreateStatusHeader(parent, title, subtitle, order)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.new(1, -30, 0, 42)
+    holder.BackgroundTransparency = 1
+    holder.LayoutOrder = order or 1
+    holder.Parent = parent
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 20)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Text = title:upper()
+    titleLabel.TextColor3 = Color3.fromRGB(0, 191, 255)
+    titleLabel.TextSize = 12
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = holder
+    local subtitleLabel = Instance.new("TextLabel")
+    subtitleLabel.Size = UDim2.new(1, 0, 0, 17)
+    subtitleLabel.Position = UDim2.new(0, 0, 0, 22)
+    subtitleLabel.BackgroundTransparency = 1
+    subtitleLabel.Font = Enum.Font.GothamMedium
+    subtitleLabel.Text = subtitle
+    subtitleLabel.TextColor3 = Color3.fromRGB(120, 120, 130)
+    subtitleLabel.TextSize = 10
+    subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    subtitleLabel.Parent = holder
+    return holder
+end
+function CreateOptionButton(parent, label, options, configKey, order)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -30, 0, 42)
+    row.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    row.LayoutOrder = order or 1
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, -125, 1, 0)
+    text.Position = UDim2.new(0, 14, 0, 0)
+    text.BackgroundTransparency = 1
+    text.Font = Enum.Font.GothamMedium
+    text.Text = label
+    text.TextColor3 = Color3.fromRGB(220, 220, 220)
+    text.TextSize = 12
+    text.TextXAlignment = Enum.TextXAlignment.Left
+    text.Parent = row
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 90, 0, 26)
+    button.Position = UDim2.new(1, -104, 0.5, -13)
+    button.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    button.Font = Enum.Font.GothamBold
+    button.TextColor3 = Color3.fromRGB(0, 191, 255)
+    button.TextSize = 10
+    button.Text = tostring(Config[configKey])
+    button.Parent = row
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 5)
+    local index = 1
+    for i, option in ipairs(options) do
+        if option == Config[configKey] then
+            index = i
+            break
+        end
+    end
+    button.MouseButton1Click:Connect(function()
+        index = index % #options + 1
+        Config[configKey] = options[index]
+        button.Text = tostring(Config[configKey])
+        SaveConfig()
+        if configKey == "HitboxColor" then
+            ClearHitboxes()
+        end
+    end)
+    return row
+end
+function CountBallModels()
     local count = 0
-    for _, controller in pairs(Controllers) do
-        if controller.Active then
+    for _, model in ipairs(workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
             count = count + 1
         end
     end
     return count
 end
-
-function StatusColor(active)
-    return active and Palette.Success or Palette.TextDim
+function CountVisuals()
+    local count = 0
+    for _, model in ipairs(workspace:GetChildren()) do
+        local visual = model:IsA("Model") and model:FindFirstChild("RagnarokHitbox")
+        if visual then
+            count = count + 1
+        end
+    end
+    return count
 end
-
-function CreateScreenGui(name, displayOrder)
-    local gui = CreateInstance("ScreenGui", {
-        Name = name,
-        ResetOnSpawn = false,
-        IgnoreGuiInset = true,
-        DisplayOrder = displayOrder or 10,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-    })
-    Protect(gui)
-    return gui
+function GetRuntimeSnapshot()
+    return {
+        Version = RAGNAROK_VERSION,
+        Alive = RAGNAROK_ALIVE,
+        Uptime = os.clock() - RAGNAROK_START,
+        BallModels = CountBallModels(),
+        Visuals = CountVisuals(),
+        MainVisible = Main and Main.Visible or false,
+        HitboxEnabled = Config.HitboxEnabled,
+        AirMoveEnabled = Config.AirMoveEnabled,
+        AntiAFK = Config.AntiAFK,
+    }
 end
-
-NotifyGui = CreateScreenGui("RagnarokNotify", 1000)
-Ragnarok = CreateScreenGui("RagnarokHub", 100)
-NotificationLayer = CreateInstance("Frame", {
-    Name = "NotificationLayer",
-    AnchorPoint = Vector2.new(1, 0),
-    Position = UDim2.new(1, -24, 0, 24),
-    Size = UDim2.new(0, 360, 0, 420),
-    BackgroundTransparency = 1,
-}, NotifyGui)
-NotificationLayout = AddList(NotificationLayer, 10, false)
-NotificationLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-
-function ProcessNotificationQueue()
-    if not RAGNAROK_ALIVE or not Config.Notifications then
-        Runtime.NotificationQueue = {}
+AdvancedPage = CreatePage("Advanced")
+ConfigPage = CreatePage("Config")
+CreateCategory(AdvancedPage, "Runtime", "7733715400")
+CreateStatusHeader(AdvancedPage, "Executor runtime", "External execution state and local controller status.", 1)
+runtimeRow, runtimeValue = CreateInfoRow(AdvancedPage, "Version", RAGNAROK_VERSION, 2)
+aliveRow, aliveValue = CreateInfoRow(AdvancedPage, "Status", "ACTIVE", 3)
+ballsRow, ballsValue = CreateInfoRow(AdvancedPage, "Ball models", "0", 4)
+visualsRow, visualsValue = CreateInfoRow(AdvancedPage, "Visual hitboxes", "0", 5)
+uptimeRow, uptimeValue = CreateInfoRow(AdvancedPage, "Session", "0s", 6)
+CreateCategory(AdvancedPage, "Visual profile", "7733978098")
+CreateOptionButton(AdvancedPage, "Hitbox color", {"Cyan", "Violet", "Green", "Amber"}, "HitboxColor", 7)
+CreateSlider(AdvancedPage, "Hitbox refresh", 0.03, 0.4, "HitboxRefreshRate")
+CreateActionButton(AdvancedPage, "CLEAR VISUAL HITBOXES", Color3.fromRGB(255, 170, 70), function()
+    ClearHitboxes()
+    Notify("Hitboxes", true)
+end, 9)
+CreateCategory(ConfigPage, "Profile", "7733993211")
+CreateStatusHeader(ConfigPage, "Configuration", "Executor file persistence and hotkey routing.", 1)
+CreateActionButton(ConfigPage, "SAVE CONFIGURATION", Color3.fromRGB(0, 191, 255), function()
+    if SaveConfig() then
+        Notify("Configuration", true)
+    end
+end, 2)
+CreateActionButton(ConfigPage, "LOAD CONFIGURATION", Color3.fromRGB(0, 191, 255), function()
+    if LoadConfig() then
+        RefreshAllControls()
+        Notify("Configuration", true)
+    end
+end, 3)
+CreateActionButton(ConfigPage, "RESTORE DEFAULTS", Color3.fromRGB(255, 170, 70), function()
+    RestoreDefaults()
+    Notify("Defaults", true)
+end, 4)
+CreateKeybindRow(ConfigPage, "Toggle interface", "ToggleKey", 5)
+CreateKeybindRow(ConfigPage, "Shutdown runtime", "ShutdownKey", 6)
+CreateOptionButton(ConfigPage, "Hitbox color", {"Cyan", "Violet", "Green", "Amber"}, "HitboxColor", 7)
+CreateStatusHeader(ConfigPage, "Compatibility", "Detected executor capabilities.", 8)
+CreateInfoRow(ConfigPage, "getgenv", type(getgenv) == "function" and "READY" or "MISSING", 9)
+CreateInfoRow(ConfigPage, "gethui", type(gethui) == "function" and "READY" or "FALLBACK", 10)
+CreateInfoRow(ConfigPage, "writefile", type(writefile) == "function" and "READY" or "MEMORY", 11)
+CreateInfoRow(ConfigPage, "loadstring", type(loadstring) == "function" and "READY" or "UNUSED", 12)
+function SetPage(name)
+    if not RAGNAROK_ALIVE then
+        return false
+    end
+    local selected = PageFrames[name]
+    if not selected then
+        return false
+    end
+    for pageName, pageData in pairs(PageFrames) do
+        local active = pageName == name
+        pageData.Page.Visible = active
+        pageData.Btn.TextColor3 = active and Color3.fromRGB(0, 191, 255) or Color3.fromRGB(150, 150, 150)
+    end
+    return true
+end
+function RefreshRuntimeRows()
+    if not RAGNAROK_ALIVE then
         return
     end
-    while #Runtime.NotificationQueue > 0 and Runtime.ActiveNotifications < 5 do
-        local data = table.remove(Runtime.NotificationQueue, 1)
-        Runtime.ActiveNotifications = Runtime.ActiveNotifications + 1
-        local card = CreateInstance("Frame", {
-            Size = UDim2.new(1, 0, 0, 72),
-            BackgroundColor3 = Palette.SurfaceRaised,
-            BackgroundTransparency = 0.02,
-            BorderSizePixel = 0,
-        }, NotificationLayer)
-        AddCorner(card, 10)
-        local stroke = AddStroke(card, data.color or Palette.Accent, 1, 0.35)
-        local rail = CreateInstance("Frame", {
-            Size = UDim2.new(0, 3, 1, -20),
-            Position = UDim2.new(0, 10, 0, 10),
-            BackgroundColor3 = data.color or Palette.Accent,
-            BorderSizePixel = 0,
-        }, card)
-        AddCorner(rail, 2)
-        local title = CreateInstance("TextLabel", {
-            Size = UDim2.new(1, -42, 0, 22),
-            Position = UDim2.new(0, 24, 0, 12),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamBold,
-            Text = data.title,
-            TextColor3 = Palette.Text,
-            TextSize = 13,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        }, card)
-        local body = CreateInstance("TextLabel", {
-            Size = UDim2.new(1, -42, 0, 24),
-            Position = UDim2.new(0, 24, 0, 36),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamMedium,
-            Text = data.body,
-            TextColor3 = Palette.TextMuted,
-            TextSize = 11,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        }, card)
-        card.Position = UDim2.new(1, 28, 0, 0)
-        Tween(card, 0.32, {Position = UDim2.new(0, 0, 0, 0)})
-        task.delay(data.duration or Config.NotificationDuration, function()
-            if not card.Parent then
+    if not runtimeValue or not aliveValue then
+        return
+    end
+    local snapshot = GetRuntimeSnapshot()
+    aliveValue.Text = snapshot.Alive and "ACTIVE" or "STOPPED"
+    aliveValue.TextColor3 = snapshot.Alive and Color3.fromRGB(0, 255, 127) or Color3.fromRGB(255, 70, 70)
+    ballsValue.Text = tostring(snapshot.BallModels)
+    visualsValue.Text = tostring(snapshot.Visuals)
+    uptimeValue.Text = string.format("%ds", math.floor(snapshot.Uptime))
+    if Config.ShowNotifications == false then
+        activeNotifs = 0
+    end
+end
+function RegisterGlobalInput()
+    if GlobalInputConnection then
+        GlobalInputConnection:Disconnect()
+    end
+    GlobalInputConnection = UIS.InputBegan:Connect(function(input, processed)
+        if not RAGNAROK_ALIVE or processed then
+            return
+        end
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then
+            return
+        end
+        local keyName = input.KeyCode.Name
+        if Config.ToggleKey and keyName == Config.ToggleKey then
+            ToggleMain()
+            return
+        end
+        if Config.ShutdownKey and Config.ShutdownKey ~= "None" and keyName == Config.ShutdownKey then
+            FullShutdown("hotkey")
+        end
+    end)
+end
+function RegisterCharacterLifecycle()
+    if CharacterConnection then
+        CharacterConnection:Disconnect()
+    end
+    CharacterConnection = LocalPlayer.CharacterAdded:Connect(function(character)
+        if not RAGNAROK_ALIVE then
+            return
+        end
+        task.delay(0.25, function()
+            if not RAGNAROK_ALIVE or not character.Parent then
                 return
             end
-            Tween(card, 0.28, {Position = UDim2.new(1, 28, 0, 0)}, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-            task.wait(0.3)
-            SafeDestroy(card)
-            Runtime.ActiveNotifications = math.max(0, Runtime.ActiveNotifications - 1)
-            ProcessNotificationQueue()
-        end)
-    end
-end
-
-function Notify(title, body, kind, duration)
-    if not Config.Notifications or not RAGNAROK_ALIVE then
-        return
-    end
-    local colors = {
-        success = Palette.Success,
-        warning = Palette.Warning,
-        danger = Palette.Danger,
-        info = Palette.Accent,
-        neutral = Palette.BorderStrong,
-    }
-    table.insert(Runtime.NotificationQueue, {
-        title = tostring(title or "RAGNAROK"),
-        body = tostring(body or ""),
-        color = colors[kind or "info"] or Palette.Accent,
-        duration = duration or Config.NotificationDuration,
-    })
-    ProcessNotificationQueue()
-end
-
-Icon = CreateInstance("TextButton", {
-    Name = "RagnarokIcon",
-    AnchorPoint = Vector2.new(1, 1),
-    Position = UDim2.new(Config.IconPos[1], Config.IconPos[2], Config.IconPos[3], Config.IconPos[4]),
-    Size = UDim2.new(0, 56, 0, 56),
-    BackgroundColor3 = Palette.Surface,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Font = Enum.Font.GothamBlack,
-    Text = "R",
-    TextColor3 = Palette.Accent,
-    TextSize = 26,
-}, Ragnarok)
-AddCorner(Icon, 16)
-AddStroke(Icon, Palette.Accent, 1.5, 0.2)
-AddGradient(Icon, Palette.SurfaceRaised, Palette.Background, 135)
-
-Shell = CreateInstance("Frame", {
-    Name = "Shell",
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0.5, 0),
-    Size = UDim2.new(0, 900, 0, 600),
-    BackgroundColor3 = Palette.Background,
-    BorderSizePixel = 0,
-    Visible = false,
-    ClipsDescendants = true,
-}, Ragnarok)
-AddCorner(Shell, 16)
-ShellStroke = AddStroke(Shell, Palette.BorderStrong, 1, 0.1)
-AddGradient(Shell, Palette.Background, Palette.Surface, 45)
-Shell.Position = UDim2.new(Config.WindowPosition[1], Config.WindowPosition[2], Config.WindowPosition[3], Config.WindowPosition[4])
-
-Header = CreateInstance("Frame", {
-    Name = "Header",
-    Size = UDim2.new(1, 0, 0, 72),
-    BackgroundColor3 = Palette.Surface,
-    BorderSizePixel = 0,
-}, Shell)
-AddStroke(Header, Palette.Border, 1, 0.35)
-
-BrandMark = CreateInstance("Frame", {
-    Size = UDim2.new(0, 38, 0, 38),
-    Position = UDim2.new(0, 18, 0, 17),
-    BackgroundColor3 = Palette.AccentSoft,
-    BorderSizePixel = 0,
-}, Header)
-AddCorner(BrandMark, 11)
-AddStroke(BrandMark, Palette.Accent, 1, 0.3)
-BrandLetter = CreateInstance("TextLabel", {
-    Size = UDim2.new(1, 0, 1, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBlack,
-    Text = "R",
-    TextColor3 = Palette.Accent,
-    TextSize = 21,
-}, BrandMark)
-
-BrandTitle = CreateInstance("TextLabel", {
-    Size = UDim2.new(0, 260, 0, 25),
-    Position = UDim2.new(0, 68, 0, 13),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "RAGNAROK HUB",
-    TextColor3 = Palette.Text,
-    TextSize = 17,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Header)
-BrandSubtitle = CreateInstance("TextLabel", {
-    Size = UDim2.new(0, 320, 0, 18),
-    Position = UDim2.new(0, 68, 0, 38),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "CONTROL SYSTEM  /  V2.0",
-    TextColor3 = Palette.TextDim,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Header)
-
-SearchBox = CreateInstance("TextBox", {
-    Size = UDim2.new(0, 190, 0, 34),
-    Position = UDim2.new(1, -312, 0, 19),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-    ClearTextOnFocus = false,
-    Font = Enum.Font.GothamMedium,
-    PlaceholderText = "Search controls",
-    PlaceholderColor3 = Palette.TextDim,
-    Text = "",
-    TextColor3 = Palette.Text,
-    TextSize = 11,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Header)
-AddCorner(SearchBox, 8)
-AddStroke(SearchBox, Palette.Border, 1, 0.2)
-AddPadding(SearchBox, 12, 8, 0, 0)
-
-HeaderStatus = CreateInstance("TextLabel", {
-    Size = UDim2.new(0, 90, 0, 18),
-    Position = UDim2.new(1, -410, 0, 27),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "● ONLINE",
-    TextColor3 = Palette.Success,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Right,
-}, Header)
-
-MinimizeButton = CreateInstance("TextButton", {
-    Size = UDim2.new(0, 30, 0, 30),
-    Position = UDim2.new(1, -112, 0, 21),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Font = Enum.Font.GothamBold,
-    Text = "—",
-    TextColor3 = Palette.TextMuted,
-    TextSize = 16,
-}, Header)
-AddCorner(MinimizeButton, 8)
-
-CloseButton = CreateInstance("TextButton", {
-    Size = UDim2.new(0, 30, 0, 30),
-    Position = UDim2.new(1, -72, 0, 21),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Font = Enum.Font.GothamBold,
-    Text = "×",
-    TextColor3 = Palette.Danger,
-    TextSize = 18,
-}, Header)
-AddCorner(CloseButton, 8)
-
-Sidebar = CreateInstance("Frame", {
-    Name = "Sidebar",
-    Position = UDim2.new(0, 0, 0, 72),
-    Size = UDim2.new(0, 196, 1, -72),
-    BackgroundColor3 = Palette.Surface,
-    BorderSizePixel = 0,
-}, Shell)
-AddStroke(Sidebar, Palette.Border, 1, 0.45)
-AddPadding(Sidebar, 12, 12, 18, 14)
-SidebarList = AddList(Sidebar, 7, false)
-
-Content = CreateInstance("Frame", {
-    Name = "Content",
-    Position = UDim2.new(0, 196, 0, 72),
-    Size = UDim2.new(1, -196, 1, -72),
-    BackgroundTransparency = 1,
-}, Shell)
-
-Footer = CreateInstance("Frame", {
-    Size = UDim2.new(1, -24, 0, 32),
-    Position = UDim2.new(0, 12, 1, -44),
-    BackgroundColor3 = Palette.Surface,
-    BorderSizePixel = 0,
-}, Content)
-AddCorner(Footer, 8)
-AddStroke(Footer, Palette.Border, 1, 0.5)
-Runtime.FooterLabel = CreateInstance("TextLabel", {
-    Size = UDim2.new(1, -22, 1, 0),
-    Position = UDim2.new(0, 11, 0, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "RAGNAROK HUB  /  INITIALIZING",
-    TextColor3 = Palette.TextDim,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, Footer)
-
-ContentPages = CreateInstance("Frame", {
-    Name = "ContentPages",
-    Size = UDim2.new(1, -24, 1, -84),
-    Position = UDim2.new(0, 12, 0, 12),
-    BackgroundTransparency = 1,
-}, Content)
-
-function UpdateFooter(text)
-    if Runtime.FooterLabel then
-        Runtime.FooterLabel.Text = text
-    end
-end
-
-function SetHeaderStatus(text, color)
-    HeaderStatus.Text = "● " .. tostring(text):upper()
-    HeaderStatus.TextColor3 = color or Palette.Success
-end
-
-function ApplyWindowPosition()
-    if Config.WindowPosition and #Config.WindowPosition == 4 then
-        Shell.Position = UDim2.new(Config.WindowPosition[1], Config.WindowPosition[2], Config.WindowPosition[3], Config.WindowPosition[4])
-    end
-end
-
-function SetShellVisible(visible)
-    if visible then
-        Shell.Visible = true
-        Shell.BackgroundTransparency = 1
-        Tween(Shell, 0.28, {BackgroundTransparency = 0})
-    else
-        Tween(Shell, 0.22, {BackgroundTransparency = 1}, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
-        task.delay(0.23, function()
-            if not Runtime.Dragging and Shell then
-                Shell.Visible = false
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid and Config.AutoRotateEnabled then
+                humanoid.AutoRotate = true
             end
+            ApplyCameraSettings()
         end)
+    end)
+end
+function RegisterCameraLifecycle()
+    if CameraConnection then
+        CameraConnection:Disconnect()
     end
+    CameraConnection = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        Camera = workspace.CurrentCamera or Camera
+        ApplyCameraSettings()
+    end)
 end
-
-function ToggleShell()
-    local visible = not Shell.Visible
-    SetShellVisible(visible)
-    Icon.Visible = not visible and not Config.HideIcon
-end
-
-function MakeDraggable(handle, target)
-    local dragging = false
-    local dragStart
-    local startPosition
-    Track(handle.InputBegan:Connect(function(input)
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+function RegisterHeartbeat()
+    if RuntimeConnection then
+        RuntimeConnection:Disconnect()
+    end
+    RuntimeConnection = RunService.Heartbeat:Connect(function()
+        if not RAGNAROK_ALIVE then
             return
         end
-        dragging = true
-        Runtime.Dragging = true
-        dragStart = input.Position
-        startPosition = target.Position
-        local endConnection
-        endConnection = input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-                Runtime.Dragging = false
-                Config.WindowPosition = {
-                    target.Position.X.Scale,
-                    target.Position.X.Offset,
-                    target.Position.Y.Scale,
-                    target.Position.Y.Offset,
-                }
-                SaveConfig(true)
-                Disconnect(endConnection)
+        RefreshRuntimeRows()
+        if Config.AntiAFK and not antiAfkActive then
+            local root = GetRootSafe()
+            if root then
+                antiAfkActive = true
+                task.spawn(function()
+                    local origin = root.CFrame
+                    task.wait(60)
+                    if RAGNAROK_ALIVE and Config.AntiAFK and root and root.Parent then
+                        root.CFrame = origin + Vector3.new(0, 0.15, 0)
+                        task.wait(0.1)
+                        if root and root.Parent then
+                            root.CFrame = origin
+                        end
+                    end
+                    antiAfkActive = false
+                end)
             end
-        end)
-    end), "drag")
-    Track(handle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragStart = dragStart or input.Position
         end
-    end), "drag")
-    Track(UIS.InputChanged:Connect(function(input)
-        if not dragging or not dragStart then
+    end)
+end
+function RegisterRenderLifecycle()
+    if RenderConnection then
+        RenderConnection:Disconnect()
+    end
+    RenderConnection = RunService.RenderStepped:Connect(function()
+        if not RAGNAROK_ALIVE then
             return
         end
-        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
-            return
+        Camera = workspace.CurrentCamera or Camera
+        if Config.HitboxEnabled then
+            CreateHitboxes(Config.HitboxScale)
+        else
+            ClearHitboxes()
         end
-        local delta = input.Position - dragStart
-        target.Position = UDim2.new(
-            startPosition.X.Scale,
-            startPosition.X.Offset + delta.X,
-            startPosition.Y.Scale,
-            startPosition.Y.Offset + delta.Y
-        )
-    end), "drag")
-end
-
-MakeDraggable(Header, Shell)
-MakeDraggable(Icon, Icon)
-
-Track(Icon.MouseButton1Click:Connect(function()
-    SetShellVisible(true)
-    Icon.Visible = false
-end), "ui")
-
-Track(MinimizeButton.MouseButton1Click:Connect(function()
-    SetShellVisible(false)
-    Icon.Visible = not Config.HideIcon
-end), "ui")
-
-ConfirmOverlay = CreateInstance("Frame", {
-    Name = "ConfirmOverlay",
-    Size = UDim2.new(1, 0, 1, 0),
-    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-    BackgroundTransparency = 0.35,
-    Visible = false,
-    ZIndex = 50,
-}, Ragnarok)
-ConfirmCard = CreateInstance("Frame", {
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0.5, 0),
-    Size = UDim2.new(0, 380, 0, 220),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-    ZIndex = 51,
-}, ConfirmOverlay)
-AddCorner(ConfirmCard, 14)
-AddStroke(ConfirmCard, Palette.BorderStrong, 1.5, 0.1)
-ConfirmTitle = CreateInstance("TextLabel", {
-    Size = UDim2.new(1, -40, 0, 28),
-    Position = UDim2.new(0, 20, 0, 20),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "CONFIRM ACTION",
-    TextColor3 = Palette.Text,
-    TextSize = 15,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 52,
-}, ConfirmCard)
-ConfirmBody = CreateInstance("TextLabel", {
-    Size = UDim2.new(1, -40, 0, 62),
-    Position = UDim2.new(0, 20, 0, 58),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "",
-    TextColor3 = Palette.TextMuted,
-    TextSize = 12,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
-    ZIndex = 52,
-}, ConfirmCard)
-ConfirmCancel = CreateInstance("TextButton", {
-    Size = UDim2.new(0, 150, 0, 38),
-    Position = UDim2.new(0, 20, 1, -56),
-    BackgroundColor3 = Palette.Surface,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Font = Enum.Font.GothamBold,
-    Text = "CANCEL",
-    TextColor3 = Palette.TextMuted,
-    TextSize = 11,
-    ZIndex = 52,
-}, ConfirmCard)
-AddCorner(ConfirmCancel, 8)
-ConfirmAccept = CreateInstance("TextButton", {
-    Size = UDim2.new(0, 150, 0, 38),
-    Position = UDim2.new(1, -170, 1, -56),
-    BackgroundColor3 = Palette.AccentStrong,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Font = Enum.Font.GothamBold,
-    Text = "CONFIRM",
-    TextColor3 = Palette.White,
-    TextSize = 11,
-    ZIndex = 52,
-}, ConfirmCard)
-AddCorner(ConfirmAccept, 8)
-PendingConfirm = nil
-
-function AskConfirmation(title, body, callback)
-    PendingConfirm = callback
-    ConfirmTitle.Text = title
-    ConfirmBody.Text = body
-    ConfirmOverlay.Visible = true
-end
-
-Track(ConfirmCancel.MouseButton1Click:Connect(function()
-    PendingConfirm = nil
-    ConfirmOverlay.Visible = false
-end), "ui")
-
-Track(ConfirmAccept.MouseButton1Click:Connect(function()
-    local callback = PendingConfirm
-    PendingConfirm = nil
-    ConfirmOverlay.Visible = false
-    SafeCall(callback)
-end), "ui")
-
-function CreatePage(id, title, subtitle)
-    local page = CreateInstance("ScrollingFrame", {
-        Name = id,
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = Palette.Accent,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-        Visible = false,
-    }, ContentPages)
-    AddPadding(page, 4, 8, 4, 52)
-    local list = AddList(page, 12, false)
-    local pageHeader = CreateInstance("Frame", {
-        Size = UDim2.new(1, -8, 0, 62),
-        BackgroundTransparency = 1,
-        LayoutOrder = 1,
-    }, page)
-    local pageTitle = CreateInstance("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 30),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold,
-        Text = title,
-        TextColor3 = Palette.Text,
-        TextSize = 23,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, pageHeader)
-    local pageSubtitle = CreateInstance("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 22),
-        Position = UDim2.new(0, 0, 0, 33),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamMedium,
-        Text = subtitle,
-        TextColor3 = Palette.TextMuted,
-        TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, pageHeader)
-    PageRegistry[id] = {
-        Id = id,
-        Page = page,
-        Header = pageHeader,
-        Title = pageTitle,
-        Subtitle = pageSubtitle,
-        List = list,
-        Controls = {},
-    }
-    return page, PageRegistry[id]
-end
-
-function CreateNavButton(id, label, glyph, order)
-    local button = CreateInstance("TextButton", {
-        Name = id .. "Nav",
-        Size = UDim2.new(1, 0, 0, 42),
-        BackgroundColor3 = Palette.Surface,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Font = Enum.Font.GothamBold,
-        Text = "",
-        LayoutOrder = order or 1,
-    }, Sidebar)
-    AddCorner(button, 9)
-    local marker = CreateInstance("Frame", {
-        Size = UDim2.new(0, 3, 0, 20),
-        Position = UDim2.new(0, 0, 0.5, -10),
-        BackgroundColor3 = Palette.Accent,
-        BorderSizePixel = 0,
-        Visible = false,
-    }, button)
-    AddCorner(marker, 2)
-    local icon = CreateInstance("TextLabel", {
-        Size = UDim2.new(0, 28, 1, 0),
-        Position = UDim2.new(0, 12, 0, 0),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold,
-        Text = glyph,
-        TextColor3 = Palette.TextDim,
-        TextSize = 15,
-    }, button)
-    local text = CreateInstance("TextLabel", {
-        Size = UDim2.new(1, -54, 1, 0),
-        Position = UDim2.new(0, 46, 0, 0),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold,
-        Text = label,
-        TextColor3 = Palette.TextMuted,
-        TextSize = 11,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, button)
-    PageButtons[id] = {Button = button, Marker = marker, Icon = icon, Text = text}
-    Track(button.MouseButton1Click:Connect(function()
-        if PageRegistry[id] then
-            Runtime.ActivePage = id
-            for pageId, pageData in pairs(PageRegistry) do
-                local active = pageId == id
-                pageData.Page.Visible = active
-                local nav = PageButtons[pageId]
-                if nav then
-                    nav.Marker.Visible = active
-                    nav.Button.BackgroundColor3 = active and Palette.AccentSoft or Palette.Surface
-                    nav.Icon.TextColor3 = active and Palette.Accent or Palette.TextDim
-                    nav.Text.TextColor3 = active and Palette.Text or Palette.TextMuted
+        ApplyCameraSettings()
+        local character = GetCharacterSafe()
+        local humanoid = GetHumanoidSafe(character)
+        local root = GetRootSafe(character)
+        if Config.AutoRotateEnabled and humanoid then
+            humanoid.AutoRotate = true
+        end
+        if Config.AirMoveEnabled and humanoid and root then
+            local state = humanoid:GetState()
+            if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+                local move = humanoid.MoveDirection
+                if move.Magnitude > 0 then
+                    local velocity = root.AssemblyLinearVelocity
+                    root.AssemblyLinearVelocity = Vector3.new(move.X * Config.AirMoveSpeed, velocity.Y, move.Z * Config.AirMoveSpeed)
                 end
             end
-            UpdateFooter("RAGNAROK HUB  /  " .. label:upper() .. "  /  READY")
         end
-    end), "ui")
-    Track(button.MouseEnter:Connect(function()
-        if Runtime.ActivePage ~= id then
-            Tween(button, 0.15, {BackgroundColor3 = Palette.SurfaceHover})
-        end
-    end), "ui")
-    Track(button.MouseLeave:Connect(function()
-        if Runtime.ActivePage ~= id then
-            Tween(button, 0.15, {BackgroundColor3 = Palette.Surface})
-        end
-    end), "ui")
-    return button
-end
-
-CreateNavButton("dashboard", "Dashboard", "⌂", 1)
-CreateNavButton("gameplay", "Gameplay", "◈", 2)
-CreateNavButton("movement", "Movement", "↯", 3)
-CreateNavButton("visuals", "Visuals", "◉", 4)
-CreateNavButton("experimental", "Experimental", "◇", 5)
-CreateNavButton("utilities", "Utilities", "▣", 6)
-CreateNavButton("settings", "Settings", "⚙", 7)
-
-SidebarDivider = CreateInstance("Frame", {
-    Size = UDim2.new(1, 0, 0, 1),
-    BackgroundColor3 = Palette.Border,
-    BorderSizePixel = 0,
-    LayoutOrder = 8,
-}, Sidebar)
-SidebarVersion = CreateInstance("TextLabel", {
-    Size = UDim2.new(1, 0, 0, 42),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "BUILD " .. RAGNAROK_BUILD .. "\nSTABLE RELEASE",
-    TextColor3 = Palette.TextDim,
-    TextSize = 9,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Center,
-    LayoutOrder = 9,
-}, Sidebar)
-
-function CreateSection(parent, title, description, order)
-    local section = CreateInstance("Frame", {
-        Size = UDim2.new(1, -8, 0, 38),
-        BackgroundTransparency = 1,
-        LayoutOrder = order or 1,
-    }, parent)
-    local label = CreateInstance("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 20),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold,
-        Text = title:upper(),
-        TextColor3 = Palette.Accent,
-        TextSize = 10,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, section)
-    local detail = CreateInstance("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 16),
-        Position = UDim2.new(0, 0, 0, 18),
-        BackgroundTransparency = 1,
-        Font = Enum.Font.GothamMedium,
-        Text = description or "",
-        TextColor3 = Palette.TextDim,
-        TextSize = 9,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, section)
-    return section
-end
-
-function CreateCard(parent, height, order)
-    local card = CreateInstance("Frame", {
-        Size = UDim2.new(1, -8, 0, height or 100),
-        BackgroundColor3 = Palette.Surface,
-        BorderSizePixel = 0,
-        LayoutOrder = order or 1,
-    }, parent)
-    AddCorner(card, 11)
-    AddStroke(card, Palette.Border, 1, 0.3)
-    return card
-end
-
-function CreateRow(parent, height, order)
-    local row = CreateInstance("Frame", {
-        Size = UDim2.new(1, -28, 0, height or 44),
-        BackgroundColor3 = Palette.SurfaceRaised,
-        BorderSizePixel = 0,
-        LayoutOrder = order or 1,
-    }, parent)
-    AddCorner(row, 8)
-    return row
-end
-
-function CreateLabel(parent, text, size, position, color, font, textSize, order)
-    return CreateInstance("TextLabel", {
-        Size = size or UDim2.new(1, 0, 1, 0),
-        Position = position or UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        Font = font or Enum.Font.GothamMedium,
-        Text = text or "",
-        TextColor3 = color or Palette.Text,
-        TextSize = textSize or 12,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        LayoutOrder = order or 1,
-    }, parent)
-end
-
-function RegisterControl(key, control)
-    ControlRegistry[key] = control
-    return control
-end
-
-function FireControlChanged(key, value)
-    local control = ControlRegistry[key]
-    if control and control.OnChanged then
-        SafeCall(control.OnChanged, value)
-    end
-    if Config.SaveOnChange then
-        SaveConfig(true)
-    end
-end
-
-function CreateToggle(parent, label, description, key, callback, order)
-    local row = CreateRow(parent, description and 62 or 46, order)
-    local title = CreateLabel(row, label, UDim2.new(1, -112, 0, 20), UDim2.new(0, 14, 0, description and 10 or 13), Palette.Text, Enum.Font.GothamBold, 12)
-    local detail
-    if description then
-        detail = CreateLabel(row, description, UDim2.new(1, -112, 0, 18), UDim2.new(0, 14, 0, 32), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    end
-    local switch = CreateInstance("TextButton", {
-        Size = UDim2.new(0, 42, 0, 22),
-        Position = UDim2.new(1, -58, 0.5, -11),
-        BackgroundColor3 = Config[key] and Palette.AccentStrong or Palette.Border,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-    }, row)
-    AddCorner(switch, 11)
-    local knob = CreateInstance("Frame", {
-        Size = UDim2.new(0, 16, 0, 16),
-        Position = Config[key] and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
-        BackgroundColor3 = Palette.White,
-        BorderSizePixel = 0,
-    }, switch)
-    AddCorner(knob, 8)
-    local function Refresh(value)
-        local active = value == true
-        Tween(switch, 0.16, {BackgroundColor3 = active and Palette.AccentStrong or Palette.Border})
-        Tween(knob, 0.16, {Position = active and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)})
-        title.TextColor3 = active and Palette.Text or Palette.TextMuted
-    end
-    row:SetAttribute("SearchText", string.lower(label .. " " .. tostring(description or "") .. " " .. key))
-    local control = RegisterControl(key, {
-        Row = row,
-        SearchText = string.lower(label .. " " .. tostring(description or "") .. " " .. key),
-        Refresh = Refresh,
-        OnChanged = callback,
-    })
-    Track(switch.MouseButton1Click:Connect(function()
-        Config[key] = not Config[key]
-        Refresh(Config[key])
-        FireControlChanged(key, Config[key])
-        Notify(label, Config[key] and "Enabled" or "Disabled", Config[key] and "success" or "neutral")
-    end), "controls")
-    Refresh(Config[key])
-    return control
-end
-
-function CreateSlider(parent, label, description, key, minimum, maximum, step, callback, order)
-    local row = CreateRow(parent, description and 76 or 60, order)
-    local title = CreateLabel(row, label, UDim2.new(1, -100, 0, 18), UDim2.new(0, 14, 0, 9), Palette.Text, Enum.Font.GothamBold, 12)
-    local valueLabel = CreateLabel(row, FormatNumber(Config[key], step and step < 1 and 1 or 0), UDim2.new(0, 72, 0, 18), UDim2.new(1, -88, 0, 9), Palette.Accent, Enum.Font.GothamBold, 11)
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-    local detail
-    if description then
-        detail = CreateLabel(row, description, UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 28), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    end
-    local trackY = description and 53 or 38
-    local track = CreateInstance("Frame", {
-        Size = UDim2.new(1, -28, 0, 6),
-        Position = UDim2.new(0, 14, 0, trackY),
-        BackgroundColor3 = Palette.Border,
-        BorderSizePixel = 0,
-        Active = true,
-    }, row)
-    AddCorner(track, 3)
-    local initial = math.clamp((tonumber(Config[key]) or minimum - minimum) - minimum, 0, maximum - minimum) / (maximum - minimum)
-    local fill = CreateInstance("Frame", {
-        Size = UDim2.new(initial, 0, 1, 0),
-        BackgroundColor3 = Palette.Accent,
-        BorderSizePixel = 0,
-    }, track)
-    AddCorner(fill, 3)
-    local thumb = CreateInstance("Frame", {
-        Size = UDim2.new(0, 12, 0, 12),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(initial, 0, 0.5, 0),
-        BackgroundColor3 = Palette.White,
-        BorderSizePixel = 0,
-    }, track)
-    AddCorner(thumb, 6)
-    local dragging = false
-    local function Snap(value)
-        local increment = step or 0.1
-        return math.clamp(math.floor((value / increment) + 0.5) * increment, minimum, maximum)
-    end
-    local function SetValue(value, emit)
-        local current = Snap(tonumber(value) or minimum)
-        local alpha = math.clamp((current - minimum) / (maximum - minimum), 0, 1)
-        Config[key] = current
-        fill.Size = UDim2.new(alpha, 0, 1, 0)
-        thumb.Position = UDim2.new(alpha, 0, 0.5, 0)
-        valueLabel.Text = step and step < 1 and FormatNumber(current, 1) or FormatNumber(current, 0)
-        if emit then
-            FireControlChanged(key, current)
-        end
-    end
-    local function UpdateFromInput(input)
-        local alpha = math.clamp((input.Position.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
-        SetValue(minimum + (maximum - minimum) * alpha, true)
-        if callback then
-            SafeCall(callback, Config[key])
-        end
-    end
-    Track(track.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            UpdateFromInput(input)
-        end
-    end), "controls")
-    Track(UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            UpdateFromInput(input)
-        end
-    end), "controls")
-    Track(UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end), "controls")
-    row:SetAttribute("SearchText", string.lower(label .. " " .. tostring(description or "") .. " " .. key))
-    local control = RegisterControl(key, {
-        Row = row,
-        SearchText = string.lower(label .. " " .. tostring(description or "") .. " " .. key),
-        Refresh = function(value)
-            SetValue(value, false)
-        end,
-        OnChanged = callback,
-    })
-    SetValue(Config[key], false)
-    return control
-end
-
-function CreateKeybind(parent, label, description, key, callback, order)
-    local row = CreateRow(parent, description and 62 or 46, order)
-    local title = CreateLabel(row, label, UDim2.new(1, -130, 0, 20), UDim2.new(0, 14, 0, description and 10 or 13), Palette.Text, Enum.Font.GothamBold, 12)
-    if description then
-        CreateLabel(row, description, UDim2.new(1, -130, 0, 18), UDim2.new(0, 14, 0, 32), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    end
-    local button = CreateInstance("TextButton", {
-        Size = UDim2.new(0, 96, 0, 28),
-        Position = UDim2.new(1, -110, 0.5, -14),
-        BackgroundColor3 = Palette.Surface,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Font = Enum.Font.GothamBold,
-        Text = Config[key] or "NONE",
-        TextColor3 = Palette.Accent,
-        TextSize = 10,
-    }, row)
-    AddCorner(button, 7)
-    AddStroke(button, Palette.BorderStrong, 1, 0.25)
-    local listening = false
-    local function Refresh(value)
-        button.Text = value or "NONE"
-        button.TextColor3 = value and value ~= "None" and Palette.Accent or Palette.TextDim
-    end
-    row:SetAttribute("SearchText", string.lower(label .. " " .. tostring(description or "") .. " " .. key))
-    local control = RegisterControl(key, {Row = row, SearchText = string.lower(label .. " " .. tostring(description or "") .. " " .. key), Refresh = Refresh, OnChanged = callback})
-    Track(button.MouseButton1Click:Connect(function()
-        if listening then
-            return
-        end
-        listening = true
-        Runtime.PendingBinding = key
-        button.Text = "PRESS KEY"
-        button.TextColor3 = Palette.Warning
-        local connection
-        connection = UIS.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.Keyboard then
-                return
-            end
-            local name = input.KeyCode.Name
-            if name == "Backspace" or name == "Escape" then
-                Config[key] = "None"
-            else
-                Config[key] = name
-            end
-            listening = false
-            Runtime.PendingBinding = nil
-            Refresh(Config[key])
-            FireControlChanged(key, Config[key])
-            Disconnect(connection)
-        end)
-    end), "controls")
-    Refresh(Config[key])
-    return control
-end
-
-function CreateAction(parent, label, description, actionText, callback, order, accent)
-    local row = CreateRow(parent, description and 62 or 46, order)
-    CreateLabel(row, label, UDim2.new(1, -140, 0, 20), UDim2.new(0, 14, 0, description and 10 or 13), Palette.Text, Enum.Font.GothamBold, 12)
-    if description then
-        CreateLabel(row, description, UDim2.new(1, -140, 0, 18), UDim2.new(0, 14, 0, 32), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    end
-    local button = CreateInstance("TextButton", {
-        Size = UDim2.new(0, 112, 0, 28),
-        Position = UDim2.new(1, -126, 0.5, -14),
-        BackgroundColor3 = accent or Palette.AccentStrong,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Font = Enum.Font.GothamBold,
-        Text = actionText,
-        TextColor3 = Palette.White,
-        TextSize = 10,
-    }, row)
-    AddCorner(button, 7)
-    Track(button.MouseButton1Click:Connect(function()
-        SafeCall(callback)
-    end), "controls")
-    Track(button.MouseEnter:Connect(function()
-        Tween(button, 0.14, {BackgroundColor3 = Palette.Accent})
-    end), "controls")
-    Track(button.MouseLeave:Connect(function()
-        Tween(button, 0.14, {BackgroundColor3 = accent or Palette.AccentStrong})
-    end), "controls")
-    return row
-end
-
-function CreateSelect(parent, label, description, key, values, callback, order)
-    local row = CreateRow(parent, description and 62 or 46, order)
-    CreateLabel(row, label, UDim2.new(1, -150, 0, 20), UDim2.new(0, 14, 0, description and 10 or 13), Palette.Text, Enum.Font.GothamBold, 12)
-    if description then
-        CreateLabel(row, description, UDim2.new(1, -150, 0, 18), UDim2.new(0, 14, 0, 32), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    end
-    local button = CreateInstance("TextButton", {
-        Size = UDim2.new(0, 122, 0, 28),
-        Position = UDim2.new(1, -136, 0.5, -14),
-        BackgroundColor3 = Palette.Surface,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Font = Enum.Font.GothamBold,
-        Text = tostring(Config[key]),
-        TextColor3 = Palette.Accent,
-        TextSize = 10,
-    }, row)
-    AddCorner(button, 7)
-    AddStroke(button, Palette.BorderStrong, 1, 0.25)
-    local index = 1
-    for position, value in ipairs(values) do
-        if value == Config[key] then
-            index = position
-            break
-        end
-    end
-    local function Refresh(value)
-        button.Text = tostring(value)
-    end
-    row:SetAttribute("SearchText", string.lower(label .. " " .. tostring(description or "") .. " " .. key))
-    local control = RegisterControl(key, {Row = row, SearchText = string.lower(label .. " " .. tostring(description or "") .. " " .. key), Refresh = Refresh, OnChanged = callback})
-    Track(button.MouseButton1Click:Connect(function()
-        local previous = Config[key]
-        index = index % #values + 1
-        Config[key] = values[index]
-        Refresh(Config[key])
-        if key == "ActiveProfile" and V3SwitchProfile then
-            V3SwitchProfile(Config[key], previous)
-        else
-            FireControlChanged(key, Config[key])
-        end
-    end), "controls")
-    return row
-end
-
-function CreateMetric(parent, label, value, position, width)
-    local card = CreateInstance("Frame", {
-        Size = UDim2.new(0, width or 150, 1, 0),
-        Position = position,
-        BackgroundColor3 = Palette.SurfaceRaised,
-        BorderSizePixel = 0,
-    }, parent)
-    AddCorner(card, 9)
-    AddStroke(card, Palette.Border, 1, 0.35)
-    CreateLabel(card, label:upper(), UDim2.new(1, -20, 0, 16), UDim2.new(0, 10, 0, 9), Palette.TextDim, Enum.Font.GothamBold, 9)
-    local valueLabel = CreateLabel(card, value, UDim2.new(1, -20, 0, 28), UDim2.new(0, 10, 0, 29), Palette.Text, Enum.Font.GothamBold, 20)
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
-    Runtime.MetricLabels[label] = valueLabel
-    return card
-end
-
-function CreateFeatureStatus(parent, key, label, order)
-    local row = CreateInstance("Frame", {
-        Size = UDim2.new(1, -22, 0, 30),
-        BackgroundTransparency = 1,
-        LayoutOrder = order or 1,
-    }, parent)
-    local dot = CreateInstance("Frame", {
-        Size = UDim2.new(0, 7, 0, 7),
-        Position = UDim2.new(0, 2, 0.5, -3),
-        BackgroundColor3 = StatusColor(IsControllerActive(key)),
-        BorderSizePixel = 0,
-    }, row)
-    AddCorner(dot, 4)
-    local labelObject = CreateLabel(row, label, UDim2.new(1, -30, 1, 0), UDim2.new(0, 18, 0, 0), Palette.TextMuted, Enum.Font.GothamMedium, 11)
-    Runtime.FeatureLabels[key] = Runtime.FeatureLabels[key] or {}
-    table.insert(Runtime.FeatureLabels[key], {Dot = dot, Label = labelObject})
-    return row
-end
-
-DashboardPage, DashboardMeta = CreatePage("dashboard", "Dashboard", "Estado operativo, métricas y acceso rápido.")
-GameplayPage, GameplayMeta = CreatePage("gameplay", "Gameplay", "Controles de interacción y asistencia de partida.")
-MovementPage, MovementMeta = CreatePage("movement", "Movement", "Movimiento aéreo, salto direccional y rotación.")
-VisualsPage, VisualsMeta = CreatePage("visuals", "Visuals", "Lectura espacial, escala y presentación visual.")
-ExperimentalPage, ExperimentalMeta = CreatePage("experimental", "Experimental", "Parámetros avanzados con aplicación controlada.")
-UtilitiesPage, UtilitiesMeta = CreatePage("utilities", "Utilities", "Persistencia, diagnóstico y mantenimiento.")
-SettingsPage, SettingsMeta = CreatePage("settings", "Settings", "Preferencias de interfaz, atajos y configuración.")
-
-DashboardMetrics = CreateInstance("Frame", {
-    Size = UDim2.new(1, -8, 0, 88),
-    BackgroundTransparency = 1,
-    LayoutOrder = 2,
-}, DashboardPage)
-CreateMetric(DashboardMetrics, "FPS", "0", UDim2.new(0, 0, 0, 0), 144)
-CreateMetric(DashboardMetrics, "Ping", "0 ms", UDim2.new(0, 154, 0, 0), 144)
-CreateMetric(DashboardMetrics, "Memory", "0 MB", UDim2.new(0, 308, 0, 0), 144)
-CreateMetric(DashboardMetrics, "Features", "0", UDim2.new(0, 462, 0, 0), 144)
-
-DashboardLeft = CreateCard(DashboardPage, 238, 3)
-CreateLabel(DashboardLeft, "SYSTEM OVERVIEW", UDim2.new(1, -32, 0, 24), UDim2.new(0, 16, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(DashboardLeft, "Runtime state and active controllers", UDim2.new(1, -32, 0, 18), UDim2.new(0, 16, 0, 38), Palette.TextDim, Enum.Font.GothamMedium, 10)
-FeatureList = CreateInstance("Frame", {
-    Size = UDim2.new(0.5, -20, 0, 154),
-    Position = UDim2.new(0, 16, 0, 68),
-    BackgroundTransparency = 1,
-}, DashboardLeft)
-AddList(FeatureList, 1, false)
-CreateFeatureStatus(FeatureList, "hitbox", "Hitbox renderer", 1)
-CreateFeatureStatus(FeatureList, "movement", "Movement controller", 2)
-CreateFeatureStatus(FeatureList, "stats", "Stat synchronization", 3)
-CreateFeatureStatus(FeatureList, "visuals", "Visual pipeline", 4)
-CreateFeatureStatus(FeatureList, "utilities", "Utility services", 5)
-DashboardRuntime = CreateInstance("Frame", {
-    Size = UDim2.new(0.5, -20, 0, 154),
-    Position = UDim2.new(0.5, 4, 0, 68),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-}, DashboardLeft)
-AddCorner(DashboardRuntime, 9)
-CreateLabel(DashboardRuntime, "RUNTIME", UDim2.new(1, -24, 0, 16), UDim2.new(0, 12, 0, 11), Palette.TextDim, Enum.Font.GothamBold, 9)
-Runtime.StatusLabel = CreateLabel(DashboardRuntime, "BOOTING", UDim2.new(1, -24, 0, 24), UDim2.new(0, 12, 0, 33), Palette.Success, Enum.Font.GothamBold, 18)
-CreateLabel(DashboardRuntime, "Version", UDim2.new(0.45, 0, 0, 18), UDim2.new(0, 12, 0, 72), Palette.TextDim, Enum.Font.GothamMedium, 10)
-RuntimeVersion = CreateLabel(DashboardRuntime, RAGNAROK_VERSION, UDim2.new(0.5, -12, 0, 18), UDim2.new(0.5, 0, 0, 72), Palette.Text, Enum.Font.GothamBold, 10)
-RuntimeVersion.TextXAlignment = Enum.TextXAlignment.Right
-CreateLabel(DashboardRuntime, "Uptime", UDim2.new(0.45, 0, 0, 18), UDim2.new(0, 12, 0, 96), Palette.TextDim, Enum.Font.GothamMedium, 10)
-RuntimeUptime = CreateLabel(DashboardRuntime, "00:00:00", UDim2.new(0.5, -12, 0, 18), UDim2.new(0.5, 0, 0, 96), Palette.Text, Enum.Font.GothamBold, 10)
-RuntimeUptime.TextXAlignment = Enum.TextXAlignment.Right
-CreateLabel(DashboardRuntime, "Profile", UDim2.new(0.45, 0, 0, 18), UDim2.new(0, 12, 0, 120), Palette.TextDim, Enum.Font.GothamMedium, 10)
-RuntimeProfile = CreateLabel(DashboardRuntime, "DEFAULT", UDim2.new(0.5, -12, 0, 18), UDim2.new(0.5, 0, 0, 120), Palette.Text, Enum.Font.GothamBold, 10)
-RuntimeProfile.TextXAlignment = Enum.TextXAlignment.Right
-
-DashboardActions = CreateCard(DashboardPage, 198, 4)
-CreateLabel(DashboardActions, "QUICK ACTIONS", UDim2.new(1, -32, 0, 24), UDim2.new(0, 16, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-DashboardActionsBody = CreatePanelBody(DashboardActions, 48, 10)
-CreateAction(DashboardActionsBody, "Save configuration", "Persist the current runtime profile.", "SAVE", function()
-    if SaveConfig(false) then
-        Notify("Configuration", "Saved to the v2 profile.", "success")
-    else
-        Notify("Configuration", "File persistence is unavailable.", "warning")
-    end
-end, 1)
-CreateAction(DashboardActionsBody, "Restore defaults", "Reset every option to the v2 baseline.", "RESET", function()
-    AskConfirmation("RESET PROFILE", "All current values will be replaced by the v2 baseline.", function()
-        ResetConfig(false)
-        for key, control in pairs(ControlRegistry) do
-            if control.Refresh and Config[key] ~= nil then
-                SafeCall(control.Refresh, Config[key])
-            end
-        end
-        Notify("Configuration", "Baseline restored.", "success")
     end)
-end, 2, Palette.BorderStrong)
-
-function UpdateMetric(label, value)
-    local object = Runtime.MetricLabels[label]
-    if object then
-        object.Text = tostring(value)
+end
+function InstallExecutorRuntime()
+    RegisterGlobalInput()
+    RegisterCharacterLifecycle()
+    RegisterCameraLifecycle()
+    RegisterHeartbeat()
+    RegisterRenderLifecycle()
+    RefreshAllControls()
+    ApplyCameraSettings()
+    if type(getgenv) == "function" then
+        getgenv().RagnarokShutdown = FullShutdown
+        getgenv().RagnarokAPI = {
+            Version = RAGNAROK_VERSION,
+            Config = Config,
+            Toggle = ToggleMain,
+            SetPage = SetPage,
+            Save = SaveConfig,
+            Load = LoadConfig,
+            Reset = RestoreDefaults,
+            Snapshot = GetRuntimeSnapshot,
+            Shutdown = FullShutdown,
+        }
     end
 end
-
-function UpdateFeatureStatus(key, active)
-    local statuses = Runtime.FeatureLabels[key]
-    if not statuses then
-        return
+InstallExecutorRuntime()
+RuntimeServices = {
+    Alive = true,
+    StartedAt = RAGNAROK_START,
+    LastRender = 0,
+    LastHeartbeat = 0,
+    LastDiagnostics = 0,
+    LastConfigSave = 0,
+    LastVisualScan = 0,
+    RenderCount = 0,
+    HeartbeatCount = 0,
+    ErrorCount = 0,
+    Log = {},
+    LogLimit = 120,
+    Connections = {},
+    Capability = {},
+    FeatureState = {},
+}
+function AddRuntimeLog(kind, message, detail)
+    local entry = {
+        Time = os.clock() - RAGNAROK_START,
+        Kind = tostring(kind or "info"),
+        Message = tostring(message or ""),
+        Detail = detail and tostring(detail) or "",
+    }
+    table.insert(RuntimeServices.Log, entry)
+    while #RuntimeServices.Log > RuntimeServices.LogLimit do
+        table.remove(RuntimeServices.Log, 1)
     end
-    for _, status in ipairs(statuses) do
-        status.Dot.BackgroundColor3 = StatusColor(active)
-        status.Label.TextColor3 = active and Palette.Text or Palette.TextMuted
+    if kind == "error" then
+        RuntimeServices.ErrorCount = RuntimeServices.ErrorCount + 1
+    end
+    return entry
+end
+function ClearRuntimeLog()
+    RuntimeServices.Log = {}
+    RuntimeServices.ErrorCount = 0
+end
+function GetRuntimeLog()
+    local result = {}
+    for index, entry in ipairs(RuntimeServices.Log) do
+        result[index] = {
+            Time = entry.Time,
+            Kind = entry.Kind,
+            Message = entry.Message,
+            Detail = entry.Detail,
+        }
+    end
+    return result
+end
+function RegisterRuntimeConnection(name, connection)
+    if RuntimeServices.Connections[name] then
+        pcall(function()
+            RuntimeServices.Connections[name]:Disconnect()
+        end)
+    end
+    RuntimeServices.Connections[name] = connection
+    return connection
+end
+function DisconnectRuntimeConnection(name)
+    local connection = RuntimeServices.Connections[name]
+    if connection then
+        pcall(function()
+            connection:Disconnect()
+        end)
+        RuntimeServices.Connections[name] = nil
     end
 end
-
-function UpdateDashboard()
-    UpdateMetric("FPS", GetFps())
-    UpdateMetric("Ping", tostring(GetPlayerPing()) .. " ms")
-    UpdateMetric("Memory", tostring(GetMemoryUsage()) .. " MB")
-    UpdateMetric("Features", tostring(CountActiveControllers()))
-    for key in pairs(Runtime.FeatureLabels) do
-        UpdateFeatureStatus(key, IsControllerActive(key))
+function DisconnectRuntimeConnections()
+    for name in pairs(RuntimeServices.Connections) do
+        DisconnectRuntimeConnection(name)
     end
-    if Runtime.StatusLabel then
-        Runtime.StatusLabel.Text = RAGNAROK_ALIVE and "OPERATIONAL" or "STOPPED"
-        Runtime.StatusLabel.TextColor3 = RAGNAROK_ALIVE and Palette.Success or Palette.Danger
+end
+function DetectExecutorCapabilities()
+    RuntimeServices.Capability = {
+        getgenv = type(getgenv) == "function",
+        gethui = type(gethui) == "function",
+        protect_gui = syn and type(syn.protect_gui) == "function" or false,
+        writefile = type(writefile) == "function",
+        readfile = type(readfile) == "function",
+        isfile = type(isfile) == "function",
+        makefolder = type(makefolder) == "function",
+        loadstring = type(loadstring) == "function",
+        request = type(request) == "function",
+        hookmetamethod = type(hookmetamethod) == "function",
+        queue_on_teleport = type(queue_on_teleport) == "function",
+    }
+    return RuntimeServices.Capability
+end
+function HasCapability(name)
+    return RuntimeServices.Capability[name] == true
+end
+function ValidateNumber(value, minimum, maximum, fallback)
+    local number = tonumber(value)
+    if not number then
+        return fallback
     end
-    local elapsed = math.max(0, os.clock() - RAGNAROK_START)
-    local seconds = math.floor(elapsed)
-    local hours = math.floor(seconds / 3600)
-    local minutes = math.floor((seconds % 3600) / 60)
-    local remainder = seconds % 60
-    RuntimeUptime.Text = string.format("%02d:%02d:%02d", hours, minutes, remainder)
+    return math.clamp(number, minimum, maximum)
 end
-
-Runtime.DashboardRefresh = UpdateDashboard
-function CreatePanelBody(card, top, bottom)
-    local body = CreateInstance("Frame", {
-        Size = UDim2.new(1, -28, 1, -(top or 54) - (bottom or 12)),
-        Position = UDim2.new(0, 14, 0, top or 54),
-        BackgroundTransparency = 1,
-    }, card)
-    AddList(body, 8, false)
-    AddPadding(body, 0, 0, 0, 0)
-    return body
+function ValidateBoolean(value, fallback)
+    if type(value) == "boolean" then
+        return value
+    end
+    return fallback
 end
-
-function FindBallModels()
-    local models = {}
-    for _, child in ipairs(workspace:GetChildren()) do
-        if child:IsA("Model") and child.Name:match("^CLIENT_BALL_%d+$") then
-            table.insert(models, child)
+function ValidateString(value, fallback)
+    if type(value) == "string" and #value > 0 then
+        return value
+    end
+    return fallback
+end
+function NormalizeExecutorConfig()
+    Config.HitboxScale = ValidateNumber(Config.HitboxScale, 1, 24, 6)
+    Config.HitboxTransparency = ValidateNumber(Config.HitboxTransparency, 0.1, 0.95, 0.7)
+    Config.HitboxRefreshRate = ValidateNumber(Config.HitboxRefreshRate, 0.03, 0.4, 0.08)
+    Config.AirMoveSpeed = ValidateNumber(Config.AirMoveSpeed, 1, 120, 15)
+    Config.NormalFOV = ValidateNumber(Config.NormalFOV, 50, 120, 70)
+    Config.StretchedFOV = ValidateNumber(Config.StretchedFOV, 70, 130, 110)
+    Config.HitboxEnabled = ValidateBoolean(Config.HitboxEnabled, true)
+    Config.DirectionalJump = ValidateBoolean(Config.DirectionalJump, true)
+    Config.AirMoveEnabled = ValidateBoolean(Config.AirMoveEnabled, false)
+    Config.AntiAFK = ValidateBoolean(Config.AntiAFK, false)
+    Config.StretchedRes = ValidateBoolean(Config.StretchedRes, false)
+    Config.AutoRotateEnabled = ValidateBoolean(Config.AutoRotateEnabled, false)
+    Config.ShowNotifications = ValidateBoolean(Config.ShowNotifications, true)
+    Config.HitboxColor = ValidateString(Config.HitboxColor, "Cyan")
+    Config.ToggleKey = ValidateString(Config.ToggleKey, "RightShift")
+    Config.ShutdownKey = ValidateString(Config.ShutdownKey, "None")
+    if type(Config.Binds) ~= "table" then
+        Config.Binds = {}
+    end
+    if type(Config.IconPos) ~= "table" or #Config.IconPos < 4 then
+        Config.IconPos = {1, -100, 1, -100}
+    end
+end
+function SetConfigValue(key, value, save)
+    local current = Config[key]
+    if current == nil then
+        return false
+    end
+    Config[key] = value
+    NormalizeExecutorConfig()
+    RefreshAllControls()
+    if key == "HitboxEnabled" and not Config.HitboxEnabled then
+        ClearHitboxes()
+    end
+    if key == "HitboxColor" then
+        ClearHitboxes()
+    end
+    if key == "StretchedRes" or key == "NormalFOV" or key == "StretchedFOV" then
+        ApplyCameraSettings()
+    end
+    if save ~= false then
+        SaveConfig()
+    end
+    AddRuntimeLog("state", key .. " changed")
+    return true
+end
+function GetConfigSnapshot()
+    local snapshot = {}
+    for key, value in pairs(Config) do
+        if type(value) == "table" then
+            snapshot[key] = {}
+            for nestedKey, nestedValue in pairs(value) do
+                snapshot[key][nestedKey] = nestedValue
+            end
+        else
+            snapshot[key] = value
         end
     end
-    return models
+    return snapshot
 end
-
-function FindBallReference(model)
-    local named = model:FindFirstChild("Ball.001")
-    if named and named:IsA("BasePart") and not HitboxRegistry[named] then
-        return named
+function GetFeatureState(name)
+    return RuntimeServices.FeatureState[name] == true
+end
+function SetFeatureState(name, active)
+    RuntimeServices.FeatureState[name] = active == true
+end
+function GetFeatureStates()
+    local states = {}
+    for name, active in pairs(RuntimeServices.FeatureState) do
+        states[name] = active
+    end
+    return states
+end
+function ResolveBallReference(model)
+    if not model or not model:IsA("Model") then
+        return nil
     end
     for _, descendant in ipairs(model:GetDescendants()) do
-        if descendant:IsA("BasePart") and descendant.Name ~= "Ball.001" then
+        if descendant:IsA("BasePart") and descendant.Name ~= "RagnarokHitbox" then
             return descendant
         end
     end
     return nil
 end
-
-function RemoveHitbox(model)
-    local existing = model and model:FindFirstChild("RagnarokHitbox")
-    if existing then
-        HitboxRegistry[existing] = nil
-        SafeDestroy(existing)
-    end
-end
-
-function ClearHitboxes()
-    for _, model in ipairs(FindBallModels()) do
-        RemoveHitbox(model)
-    end
-    HitboxRegistry = {}
-end
-
-function ApplyHitbox(model, scale)
-    if not model or not model.Parent then
-        return
-    end
-    local reference = FindBallReference(model)
-    if not reference then
-        return
-    end
-    local hitbox = model:FindFirstChild("RagnarokHitbox")
-    if not hitbox then
-        hitbox = CreateInstance("Part", {
-            Name = "RagnarokHitbox",
-            Shape = Enum.PartType.Ball,
-            Anchored = true,
-            CanCollide = false,
-            CanTouch = false,
-            CanQuery = false,
-            CastShadow = false,
-            Material = Enum.Material.ForceField,
-            Transparency = Config.HitboxTransparency,
-            Color = AccentColor(),
-            Size = Vector3.new(scale, scale, scale),
-            CFrame = reference.CFrame,
-        }, model)
-        HitboxRegistry[hitbox] = model
-    else
-        hitbox.Size = Vector3.new(scale, scale, scale)
-        hitbox.Transparency = Config.HitboxTransparency
-        hitbox.Color = AccentColor()
-        hitbox.CFrame = reference.CFrame
-    end
-end
-
-function RefreshHitboxes(force)
-    if not IsAlive() then
-        return
-    end
-    local now = os.clock()
-    if not force and now - Runtime.LastHitboxScan < (Config.PerformanceMode and 0.14 or 0.06) then
-        return
-    end
-    Runtime.LastHitboxScan = now
-    if not Config.HitboxEnabled then
-        ClearHitboxes()
-        return
-    end
-    for _, model in ipairs(FindBallModels()) do
-        ApplyHitbox(model, Config.HitboxScale)
-    end
-    for hitbox, model in pairs(HitboxRegistry) do
-        if not hitbox.Parent or not model or not model.Parent then
-            HitboxRegistry[hitbox] = nil
+function GetBallModels()
+    local result = {}
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child:IsA("Model") and child.Name:match("^CLIENT_BALL_%d+$") then
+            table.insert(result, child)
         end
     end
+    return result
 end
-
-StatAttrNames = {
-    DiveSpeed = "GameDiveSpeedMultiplier",
-    SpikePower = "GameSpikePowerMultiplier",
-    TiltPower = "GameTiltPowerMultiplier",
-    SpeedMult = "GameSpeedMultiplier",
-    SetPower = "GameSetPowerMultiplier",
-    ServePower = "GameServePowerMultiplier",
-    JumpPowerMult = "GameJumpPowerMultiplier",
-    BumpPower = "GameBumpPowerMultiplier",
-    BlockPower = "GameBlockPowerMultiplier",
-}
-
-function CaptureBaseline()
-    local player = LocalPlayer
-    if not player then
-        return
-    end
-    for _, attributeName in pairs(StatAttrNames) do
-        if Baseline.PlayerAttributes[attributeName] == nil then
-            Baseline.PlayerAttributes[attributeName] = player:GetAttribute(attributeName)
-        end
-    end
-    local character = GetCharacter()
-    if not character or Baseline.Character == character then
-        return
-    end
-    local humanoid = GetHumanoid(character)
-    if humanoid then
-        Baseline.WalkSpeed = humanoid.WalkSpeed
-        Baseline.JumpPower = humanoid.JumpPower
-        Baseline.JumpHeight = humanoid.JumpHeight
-        Baseline.Character = character
-    end
-    Baseline.CharacterAttributes = {}
-    for _, attributeName in pairs(StatAttrNames) do
-        Baseline.CharacterAttributes[attributeName] = character:GetAttribute(attributeName)
-    end
-end
-
-function SetAttributeSafe(instance, attributeName, value)
-    if not instance then
-        return
-    end
-    pcall(function()
-        instance:SetAttribute(attributeName, value)
-    end)
-end
-
-function ApplyAttributeToScope(attributeName, value)
-    SetAttributeSafe(LocalPlayer, attributeName, value)
-    local character = GetCharacter()
-    if character then
-        SetAttributeSafe(character, attributeName, value)
-        local humanoid = GetHumanoid(character)
-        if humanoid then
-            SetAttributeSafe(humanoid, attributeName, value)
-        end
-    end
-end
-
-function ResetCharacterMovement()
-    local humanoid = GetHumanoid()
-    if not humanoid then
-        return
-    end
-    if Baseline.WalkSpeed then
-        pcall(function()
-            humanoid.WalkSpeed = Baseline.WalkSpeed
-        end)
-    end
-    if Baseline.JumpPower then
-        pcall(function()
-            humanoid.JumpPower = Baseline.JumpPower
-        end)
-    end
-    if Baseline.JumpHeight then
-        pcall(function()
-            humanoid.JumpHeight = Baseline.JumpHeight
-        end)
-    end
-end
-
-function ResetAttributes()
-    for _, attributeName in pairs(StatAttrNames) do
-        local playerValue = Baseline.PlayerAttributes[attributeName]
-        ApplyAttributeToScope(attributeName, playerValue)
-    end
-    ResetCharacterMovement()
-end
-
-function ApplyStats()
-    if not Config.EnableStatChangers then
-        ResetAttributes()
-        return
-    end
-    CaptureBaseline()
-    for key, attributeName in pairs(StatAttrNames) do
-        local value = tonumber(Config[key])
-        if value then
-            ApplyAttributeToScope(attributeName, value)
-        end
-    end
-    local humanoid = GetHumanoid()
-    if humanoid then
-        local baseWalkSpeed = Baseline.WalkSpeed or 16
-        local baseJumpPower = Baseline.JumpPower or 50
-        local baseJumpHeight = Baseline.JumpHeight or 7.2
-        pcall(function()
-            humanoid.WalkSpeed = baseWalkSpeed * (Config.SpeedMult or 1)
-            humanoid.JumpPower = baseJumpPower * (Config.JumpPowerMult or 1)
-            humanoid.JumpHeight = baseJumpHeight * (Config.JumpPowerMult or 1)
-        end)
-    end
-end
-
-function RefreshStatHooks()
-    DisconnectBucket("attribute-hooks")
-    if not Config.EnableStatChangers then
-        return
-    end
-    for key, attributeName in pairs(StatAttrNames) do
-        local expected = Config[key]
-        Track(LocalPlayer:GetAttributeChangedSignal(attributeName):Connect(function()
-            if not IsAlive() or not Config.EnableStatChangers then
-                return
-            end
-            local current = LocalPlayer:GetAttribute(attributeName)
-            if current ~= expected then
-                SetAttributeSafe(LocalPlayer, attributeName, expected)
-            end
-        end), "attribute-hooks")
-    end
-end
-
-function SetCameraFov()
-    local camera = GetCamera()
-    if not camera then
-        return
-    end
-    local desired = Config.StretchedRes and Config.StretchedFOV or Config.NormalFOV
-    if camera.FieldOfView ~= desired then
-        camera.FieldOfView = desired
-    end
-end
-
-function SetAutoRotate(enabled)
-    local humanoid = GetHumanoid()
-    if humanoid and enabled then
-        humanoid.AutoRotate = true
-    end
-end
-
-function FaceCameraDirection()
-    local character = GetCharacter()
-    local humanoid = GetHumanoid(character)
-    local root = GetRoot(character)
-    local camera = GetCamera()
-    if not humanoid or not root or not camera or not Config.DirectionalJump then
-        return
-    end
-    local direction = Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z)
-    if direction.Magnitude <= 0.01 then
-        return
-    end
-    pcall(function()
-        root.CFrame = CFrame.lookAt(root.Position, root.Position + direction.Unit)
-        if not Config.AutoRotateEnabled then
-            humanoid.AutoRotate = false
-        end
-    end)
-end
-
-function ApplyAirMove()
-    if not Config.AirMoveEnabled then
-        return
-    end
-    local character = GetCharacter()
-    local humanoid = GetHumanoid(character)
-    local root = GetRoot(character)
-    if not humanoid or not root then
-        return
-    end
-    local state = humanoid:GetState()
-    local airborne = state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping
-    if not airborne then
-        return
-    end
-    local direction = humanoid.MoveDirection
-    if direction.Magnitude <= 0.01 then
-        return
-    end
-    local current = root.AssemblyLinearVelocity
-    local horizontal = direction.Unit * Config.AirMoveSpeed
-    local vertical = Config.AirMoveVertical and current.Y or current.Y
-    pcall(function()
-        root.AssemblyLinearVelocity = Vector3.new(horizontal.X, vertical, horizontal.Z)
-    end)
-end
-
-function StartAntiAfk()
-    if Runtime.AntiAfkRunning then
-        return
-    end
-    Runtime.AntiAfkRunning = true
-    task.spawn(function()
-        while IsAlive() and Config.AntiAFK do
-            task.wait(48)
-            if not IsAlive() or not Config.AntiAFK then
-                break
-            end
-            local root = GetRoot()
-            if root then
-                local position = root.Position
-                pcall(function()
-                    root.CFrame = root.CFrame + Vector3.new(0, 0.2, 0)
-                end)
-                task.wait(0.1)
-                if root and root.Parent then
-                    pcall(function()
-                        root.CFrame = CFrame.new(position) * (root.CFrame - root.Position)
-                    end)
-                end
-            end
-        end
-        Runtime.AntiAfkRunning = false
-    end)
-end
-
-function StopAntiAfk()
-    Runtime.AntiAfkRunning = false
-end
-
-function SetFeatureConfig(key, value, controllerName)
-    Config[key] = value
-    if controllerName then
-        SetController(controllerName, value)
-    end
-    FireControlChanged(key, value)
-end
-
-RegisterController("hitbox", function()
-    RefreshHitboxes(true)
-end, function()
-    ClearHitboxes()
-end, function()
-    RefreshHitboxes(true)
-end)
-
-RegisterController("movement", function()
-    SetAutoRotate(Config.AutoRotateEnabled)
-end, function()
-    local humanoid = GetHumanoid()
-    if humanoid then
-        humanoid.AutoRotate = true
-    end
-end, function()
-    SetAutoRotate(Config.AutoRotateEnabled)
-end)
-
-RegisterController("stats", function()
-    CaptureBaseline()
-    ApplyStats()
-    RefreshStatHooks()
-end, function()
-    DisconnectBucket("attribute-hooks")
-    ResetAttributes()
-end, function()
-    ApplyStats()
-end)
-
-RegisterController("visuals", function()
-    SetCameraFov()
-    RefreshHitboxes(true)
-end, function()
-    local camera = GetCamera()
-    if camera and Baseline.FieldOfView then
-        camera.FieldOfView = Baseline.FieldOfView
-    end
-end, function()
-    SetCameraFov()
-end)
-
-RegisterController("utilities", function()
-    if Config.AntiAFK then
-        StartAntiAfk()
-    end
-end, function()
-    StopAntiAfk()
-end, function()
-    if Config.AntiAFK then
-        StartAntiAfk()
-    end
-end)
-
-function RefreshControllers()
-    SetController("hitbox", Config.HitboxEnabled)
-    SetController("movement", Config.DirectionalJump or Config.AirMoveEnabled or Config.AutoRotateEnabled)
-    SetController("stats", Config.EnableStatChangers)
-    SetController("visuals", Config.StretchedRes or Config.HitboxEnabled)
-    SetController("utilities", Config.AntiAFK)
-end
-
-function UpdateControllerFromConfig(key)
-    if key == "HitboxEnabled" then
-        SetController("hitbox", Config.HitboxEnabled)
-    elseif key == "DirectionalJump" or key == "AirMoveEnabled" or key == "AutoRotateEnabled" then
-        SetController("movement", Config.DirectionalJump or Config.AirMoveEnabled or Config.AutoRotateEnabled)
-    elseif key == "EnableStatChangers" then
-        SetController("stats", Config.EnableStatChangers)
-    elseif key == "StretchedRes" or key == "HitboxTransparency" or key == "HitboxColor" then
-        SetController("visuals", Config.StretchedRes or Config.HitboxEnabled)
-    elseif key == "AntiAFK" then
-        SetController("utilities", Config.AntiAFK)
-    end
-end
-
-function ReconcileConfiguration()
-    ApplyWindowPosition()
-    RefreshControllers()
-    ApplyStats()
-    RefreshStatHooks()
-    SetCameraFov()
-    RefreshHitboxes(true)
-    if Config.HideIcon then
-        Icon.Visible = false
-    elseif not Shell.Visible then
-        Icon.Visible = true
-    end
-end
-
-function UpdateControlAndRuntime(key, value)
-    if ControlRegistry[key] and ControlRegistry[key].Refresh then
-        SafeCall(ControlRegistry[key].Refresh, value)
-    end
-    UpdateControllerFromConfig(key)
-end
-
-function UpdateAllControls()
-    for key, control in pairs(ControlRegistry) do
-        if control.Refresh and Config[key] ~= nil then
-            SafeCall(control.Refresh, Config[key])
-        end
-    end
-end
-
-CreateSection(GameplayPage, "Game control", "Core interaction options", 2)
-GameplayCoreCard = CreateCard(GameplayPage, 246, 3)
-CreateLabel(GameplayCoreCard, "CORE INPUT", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(GameplayCoreCard, "Local control routing and key actions", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-GameplayBody = CreatePanelBody(GameplayCoreCard, 62, 12)
-CreateToggle(GameplayBody, "Powerful serve mode", "Registers the Z action without remote enumeration.", "PowerfulServeEnabled", function(value)
-    if value then
-        Notify("Serve mode", "Local trigger armed on Z.", "success")
-    else
-        Notify("Serve mode", "Local trigger disarmed.", "neutral")
-    end
-end, 1)
-CreateKeybind(GameplayBody, "Serve action key", "Configurable input binding for serve mode.", "ServeKey", function()
-end, 2)
-CreateToggle(GameplayBody, "Notifications", "Show state changes and system alerts.", "Notifications", function()
-end, 3)
-
-GameplayStatusCard = CreateCard(GameplayPage, 160, 4)
-CreateLabel(GameplayStatusCard, "CONTROL STATUS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(GameplayStatusCard, "Feature status is refreshed from runtime state.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-GameplayStatusBody = CreatePanelBody(GameplayStatusCard, 62, 12)
-CreateFeatureStatus(GameplayStatusBody, "hitbox", "Hitbox renderer", 1)
-CreateFeatureStatus(GameplayStatusBody, "movement", "Movement controller", 2)
-CreateFeatureStatus(GameplayStatusBody, "stats", "Stat synchronization", 3)
-
-CreateSection(MovementPage, "Movement system", "Air handling and orientation controls", 2)
-MovementCard = CreateCard(MovementPage, 306, 3)
-CreateLabel(MovementCard, "MOVEMENT PARAMETERS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(MovementCard, "Apply only while the relevant controller is active.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-MovementBody = CreatePanelBody(MovementCard, 62, 12)
-CreateToggle(MovementBody, "Directional jump", "Aligns the character to the current camera direction.", "DirectionalJump", function()
-    UpdateControllerFromConfig("DirectionalJump")
-end, 1)
-CreateToggle(MovementBody, "Air move", "Applies horizontal movement while airborne.", "AirMoveEnabled", function()
-    UpdateControllerFromConfig("AirMoveEnabled")
-end, 2)
-CreateSlider(MovementBody, "Air move speed", "Horizontal velocity cap while airborne.", "AirMoveSpeed", 1, 120, 1, function()
-end, 3)
-CreateToggle(MovementBody, "Air vertical control", "Preserves vertical velocity while air movement is active.", "AirMoveVertical", function()
-end, 4)
-
-RotationCard = CreateCard(MovementPage, 136, 4)
-CreateLabel(RotationCard, "ORIENTATION", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(RotationCard, "Character orientation lifecycle", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-RotationBody = CreatePanelBody(RotationCard, 62, 12)
-CreateToggle(RotationBody, "Auto rotate monitor", "Restores humanoid rotation when disabled by movement logic.", "AutoRotateEnabled", function()
-    UpdateControllerFromConfig("AutoRotateEnabled")
-end, 1)
-
-CreateSection(VisualsPage, "Visual pipeline", "Rendering, scale and camera presentation", 2)
-VisualsCard = CreateCard(VisualsPage, 322, 3)
-CreateLabel(VisualsCard, "VISUAL PARAMETERS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(VisualsCard, "Readable overlays with controlled update frequency.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-VisualsBody = CreatePanelBody(VisualsCard, 62, 12)
-CreateToggle(VisualsBody, "Hitbox enabled", "Render a local visual radius around detected ball models.", "HitboxEnabled", function()
-    UpdateControllerFromConfig("HitboxEnabled")
-end, 1)
-CreateSlider(VisualsBody, "Hitbox scale", "Diameter of the local visual radius.", "HitboxScale", 1, 24, 1, function()
-    RefreshHitboxes(true)
-end, 2)
-CreateSlider(VisualsBody, "Hitbox transparency", "Opacity of the local force-field visual.", "HitboxTransparency", 0.1, 0.95, 0.05, function()
-    RefreshHitboxes(true)
-end, 3)
-CreateSelect(VisualsBody, "Hitbox accent", "Color used by the visual radius.", "HitboxColor", {"Cyan", "Violet", "Green", "Amber"}, function()
-    RefreshHitboxes(true)
-end, 4)
-CameraCard = CreateCard(VisualsPage, 292, 4)
-CreateLabel(CameraCard, "CAMERA", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(CameraCard, "Field of view and performance presentation.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-CameraBody = CreatePanelBody(CameraCard, 62, 12)
-CreateToggle(CameraBody, "Stretched presentation", "Use the configured wide field of view.", "StretchedRes", function()
-    UpdateControllerFromConfig("StretchedRes")
-end, 1)
-CreateSlider(CameraBody, "Normal FOV", "Baseline field of view when stretched mode is disabled.", "NormalFOV", 50, 120, 1, function()
-    SetCameraFov()
-end, 2)
-CreateSlider(CameraBody, "Stretched FOV", "Field of view used by stretched presentation.", "StretchedFOV", 70, 130, 1, function()
-    SetCameraFov()
-end, 3)
-
-CreateSection(ExperimentalPage, "Advanced parameters", "Controlled attribute synchronization and movement multipliers", 2)
-StatToggleCard = CreateCard(ExperimentalPage, 150, 3)
-CreateLabel(StatToggleCard, "STAT SYNCHRONIZATION", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(StatToggleCard, "The controller captures a baseline before applying values.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-StatToggleBody = CreatePanelBody(StatToggleCard, 62, 12)
-CreateToggle(StatToggleBody, "Enable stat changers", "Apply configured attributes and character multipliers.", "EnableStatChangers", function()
-    UpdateControllerFromConfig("EnableStatChangers")
-end, 1)
-
-StatCardA = CreateCard(ExperimentalPage, 520, 4)
-CreateLabel(StatCardA, "GAME MULTIPLIERS A", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(StatCardA, "Values are synchronized only while the feature is active.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-StatBodyA = CreatePanelBody(StatCardA, 62, 12)
-CreateSlider(StatBodyA, "Dive speed", "Dive speed multiplier.", "DiveSpeed", 0, 5, 0.1, function()
-    ApplyStats()
-end, 1)
-CreateSlider(StatBodyA, "Spike power", "Spike power multiplier.", "SpikePower", 0, 500, 1, function()
-    ApplyStats()
-end, 2)
-CreateSlider(StatBodyA, "Tilt power", "Tilt power multiplier.", "TiltPower", 0, 500, 1, function()
-    ApplyStats()
-end, 3)
-CreateSlider(StatBodyA, "Speed multiplier", "Walk speed multiplier.", "SpeedMult", 0.25, 2, 0.05, function()
-    ApplyStats()
-end, 4)
-CreateSlider(StatBodyA, "Set power", "Set power multiplier.", "SetPower", 0, 500, 1, function()
-    ApplyStats()
-end, 5)
-
-StatCardB = CreateCard(ExperimentalPage, 520, 5)
-CreateLabel(StatCardB, "GAME MULTIPLIERS B", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(StatCardB, "Use restrained values for predictable behavior.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-StatBodyB = CreatePanelBody(StatCardB, 62, 12)
-CreateSlider(StatBodyB, "Serve power", "Serve power multiplier.", "ServePower", 0, 500, 1, function()
-    ApplyStats()
-end, 1)
-CreateSlider(StatBodyB, "Jump power", "Jump power and jump height multiplier.", "JumpPowerMult", 0, 5, 0.1, function()
-    ApplyStats()
-end, 2)
-CreateSlider(StatBodyB, "Bump power", "Bump power multiplier.", "BumpPower", 0, 500, 1, function()
-    ApplyStats()
-end, 3)
-CreateSlider(StatBodyB, "Block power", "Block power multiplier.", "BlockPower", 0, 500, 1, function()
-    ApplyStats()
-end, 4)
-CreateAction(StatBodyB, "Restore captured baseline", "Reapply the values detected before synchronization.", "RESTORE", function()
-    ResetAttributes()
-    Notify("Statistics", "Captured baseline restored.", "success")
-end, 5, Palette.BorderStrong)
-
-CreateSection(UtilitiesPage, "Maintenance", "Persistence, diagnostics and lifecycle controls", 2)
-UtilityCard = CreateCard(UtilitiesPage, 280, 3)
-CreateLabel(UtilityCard, "RUNTIME UTILITIES", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(UtilityCard, "Manage the active profile without restarting the hub.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-UtilityBody = CreatePanelBody(UtilityCard, 62, 12)
-CreateToggle(UtilityBody, "Anti AFK", "Performs a low-frequency local position nudge.", "AntiAFK", function()
-    UpdateControllerFromConfig("AntiAFK")
-end, 1)
-CreateToggle(UtilityBody, "Performance mode", "Reduces scan cadence and nonessential updates.", "PerformanceMode", function()
-    RefreshHitboxes(true)
-end, 2)
-CreateToggle(UtilityBody, "Show metrics", "Display FPS, ping, memory and active feature cards.", "ShowMetrics", function(value)
-    DashboardMetrics.Visible = value
-end, 3)
-
-PersistenceCard = CreateCard(UtilitiesPage, 280, 4)
-CreateLabel(PersistenceCard, "PROFILE MANAGEMENT", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(PersistenceCard, "The profile is stored in the v2 configuration path.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-PersistenceBody = CreatePanelBody(PersistenceCard, 62, 12)
-CreateAction(PersistenceBody, "Save current profile", "Write the normalized configuration to disk.", "SAVE", function()
-    if SaveConfig(false) then
-        Notify("Profile", "Saved successfully.", "success")
-    else
-        Notify("Profile", "Write access is unavailable.", "warning")
-    end
-end, 1)
-CreateAction(PersistenceBody, "Reload saved profile", "Load the last normalized profile from disk.", "LOAD", function()
-    if LoadConfig(false) then
-        UpdateAllControls()
-        ReconcileConfiguration()
-        Notify("Profile", "Loaded successfully.", "success")
-    else
-        Notify("Profile", "No valid saved profile was found.", "warning")
-    end
-end, 2)
-CreateAction(PersistenceBody, "Reset profile", "Replace the current profile with the baseline.", "RESET", function()
-    AskConfirmation("RESET PROFILE", "Current values will be replaced by the baseline profile.", function()
-        ResetConfig(false)
-        UpdateAllControls()
-        ReconcileConfiguration()
-        Notify("Profile", "Baseline profile restored.", "success")
-    end)
-end, 3, Palette.BorderStrong)
-
-DiagnosticsCard = CreateCard(UtilitiesPage, 222, 5)
-CreateLabel(DiagnosticsCard, "DIAGNOSTICS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(DiagnosticsCard, "Compact runtime checks for troubleshooting.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-DiagnosticsBody = CreatePanelBody(DiagnosticsCard, 62, 12)
-CreateAction(DiagnosticsBody, "Refresh diagnostics", "Reconcile controllers, camera and visual registry.", "REFRESH", function()
-    ReconcileConfiguration()
-    UpdateDashboard()
-    Notify("Diagnostics", "Runtime state reconciled.", "success")
-end, 1)
-CreateAction(DiagnosticsBody, "Clear hitbox registry", "Remove all local visual instances and rebuild on demand.", "CLEAR", function()
-    ClearHitboxes()
-    Notify("Diagnostics", "Visual registry cleared.", "success")
-end, 2, Palette.BorderStrong)
-
-CreateSection(SettingsPage, "Interface", "Presentation and interaction preferences", 2)
-SettingsInterface = CreateCard(SettingsPage, 356, 3)
-CreateLabel(SettingsInterface, "INTERFACE SETTINGS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(SettingsInterface, "Tune the hub shell without changing feature behavior.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-SettingsInterfaceBody = CreatePanelBody(SettingsInterface, 62, 12)
-CreateToggle(SettingsInterfaceBody, "Hide floating icon", "Keep the launcher hidden while the hub is minimized.", "HideIcon", function(value)
-    Icon.Visible = not value and not Shell.Visible
-end, 1)
-CreateToggle(SettingsInterfaceBody, "Compact mode", "Reduce spacing inside control rows.", "CompactMode", function()
-    Notify("Interface", "Compact mode applies to newly built sessions.", "info")
-end, 2)
-CreateToggle(SettingsInterfaceBody, "Save on change", "Persist controls after each accepted update.", "SaveOnChange", function()
-end, 3)
-CreateSlider(SettingsInterfaceBody, "Notification duration", "Time before a notification leaves the queue.", "NotificationDuration", 1, 8, 1, function()
-end, 4)
-
-SettingsKeyCard = CreateCard(SettingsPage, 214, 4)
-CreateLabel(SettingsKeyCard, "KEYBINDS", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(SettingsKeyCard, "Click a key field and press the desired key.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-SettingsKeyBody = CreatePanelBody(SettingsKeyCard, 62, 12)
-CreateKeybind(SettingsKeyBody, "Toggle UI", "Open or minimize the main window.", "ToggleUIKey", function()
-end, 1)
-CreateKeybind(SettingsKeyBody, "Reset key", "Reserved emergency reset binding.", "ResetKey", function()
-end, 2)
-
-SettingsAbout = CreateCard(SettingsPage, 142, 5)
-CreateLabel(SettingsAbout, "BUILD INFORMATION", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(SettingsAbout, "Ragnarok Hub v" .. RAGNAROK_VERSION .. "  /  build " .. RAGNAROK_BUILD, UDim2.new(1, -28, 0, 18), UDim2.new(0, 14, 0, 45), Palette.TextMuted, Enum.Font.GothamMedium, 11)
-CreateLabel(SettingsAbout, "Lifecycle-safe runtime with normalized configuration.", UDim2.new(1, -28, 0, 18), UDim2.new(0, 14, 0, 72), Palette.TextDim, Enum.Font.GothamMedium, 10)
-
-function SetActivePage(id)
-    local target = PageRegistry[id] and id or "dashboard"
-    Runtime.ActivePage = target
-    for pageId, pageData in pairs(PageRegistry) do
-        local active = pageId == target
-        pageData.Page.Visible = active
-        local nav = PageButtons[pageId]
-        if nav then
-            nav.Marker.Visible = active
-            nav.Button.BackgroundColor3 = active and Palette.AccentSoft or Palette.Surface
-            nav.Icon.TextColor3 = active and Palette.Accent or Palette.TextDim
-            nav.Text.TextColor3 = active and Palette.Text or Palette.TextMuted
-        end
-    end
-end
-
-UpdatePageVisibilityForSearch = nil
-
-function ApplySearch(query)
-    Runtime.SearchQuery = string.lower(tostring(query or ""))
-    local normalized = Runtime.SearchQuery
-    for _, control in pairs(ControlRegistry) do
-        if control.Row then
-            local rowText = control.SearchText or string.lower(control.Row.Name)
-            control.Row.Visible = normalized == "" or string.find(rowText, normalized, 1, true) ~= nil
-        end
-    end
-    UpdatePageVisibilityForSearch()
-end
-
-Track(SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    ApplySearch(SearchBox.Text)
-end), "ui")
-
-function HandleKeybind(input, processed)
-    if processed or input.UserInputType ~= Enum.UserInputType.Keyboard then
-        return
-    end
-    local keyName = input.KeyCode.Name
-    if Runtime.PendingBinding then
-        return
-    end
-    if Config.CommandPaletteKey and keyName == Config.CommandPaletteKey and OpenCommandPalette then
-        OpenCommandPalette()
-        return
-    end
-    if Config.ToggleUIKey and keyName == Config.ToggleUIKey then
-        ToggleShell()
-        return
-    end
-    if Config.ResetKey and Config.ResetKey ~= "None" and keyName == Config.ResetKey then
-        AskConfirmation("RESET PROFILE", "The reset key was pressed. Confirm baseline restoration.", function()
-            ResetConfig(false)
-            UpdateAllControls()
-            ReconcileConfiguration()
-            Notify("Profile", "Baseline profile restored.", "success")
-        end)
-        return
-    end
-    if Config.ServeKey and keyName == Config.ServeKey and Config.PowerfulServeEnabled then
-        Notify("Serve mode", "Local serve action received.", "info")
-    end
-    for featureKey, bind in pairs(Config.Binds) do
-        if bind == keyName and ControlRegistry[featureKey] then
-            local current = Config[featureKey]
-            if type(current) == "boolean" then
-                Config[featureKey] = not current
-                UpdateControlAndRuntime(featureKey, Config[featureKey])
-                Notify(featureKey, Config[featureKey] and "Enabled" or "Disabled", Config[featureKey] and "success" or "neutral")
-            end
-        end
-    end
-end
-
-Track(UIS.InputBegan:Connect(HandleKeybind), "input")
-
-function HandleJump()
-    if not IsAlive() then
-        return
-    end
-    if Config.DirectionalJump then
-        task.defer(function()
-            task.wait(0.04)
-            if IsAlive() then
-                FaceCameraDirection()
-            end
-        end)
-    end
-end
-
-Track(UIS.JumpRequest:Connect(HandleJump), "input")
-
-function HandleCharacterAdded(character)
-    if not IsAlive() then
-        return
-    end
-    Baseline.Character = nil
-    Baseline.CharacterAttributes = {}
-    task.delay(0.25, function()
-        if not IsAlive() or not character.Parent then
-            return
-        end
-        CaptureBaseline()
-        ApplyStats()
-        RefreshStatHooks()
-        SetAutoRotate(Config.AutoRotateEnabled)
-    end)
-end
-
-Track(LocalPlayer.CharacterAdded:Connect(HandleCharacterAdded), "character")
-
-Track(workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-    if not IsAlive() then
-        return
-    end
-    task.defer(SetCameraFov)
-end), "visuals")
-
-function GetPageMatch(id)
-    local page = PageRegistry[id]
-    if not page then
-        return false
-    end
-    local query = Runtime.SearchQuery
-    if query == "" then
+function RemoveVisualFromModel(model)
+    local visual = model and model:FindFirstChild("RagnarokHitbox")
+    if visual then
+        visual:Destroy()
         return true
-    end
-    return string.find(string.lower(page.Title.Text .. " " .. page.Subtitle.Text), query, 1, true) ~= nil
-end
-
-UpdatePageVisibilityForSearch = function()
-    local query = Runtime.SearchQuery
-    if query == "" then
-        SetActivePage(Runtime.ActivePage)
-        return
-    end
-    for id, page in pairs(PageRegistry) do
-        local pageMatch = GetPageMatch(id)
-        for _, child in ipairs(page.Page:GetChildren()) do
-            if child:IsA("Frame") and child ~= page.Header then
-                local visible = pageMatch
-                if not pageMatch then
-                    local text = string.lower(child.Name .. " " .. child:GetFullName())
-                    visible = string.find(text, query, 1, true) ~= nil
-                end
-                child.Visible = visible
-            end
-        end
-    end
-end
-
-Track(SearchBox.FocusLost:Connect(UpdatePageVisibilityForSearch), "ui")
-
-function RebuildIconVisibility()
-    if Config.HideIcon then
-        Icon.Visible = false
-    else
-        Icon.Visible = not Shell.Visible
-    end
-end
-
-function FullShutdown(reason)
-    if not RAGNAROK_ALIVE then
-        return
-    end
-    Runtime.ShutdownReason = reason or "manual"
-    RAGNAROK_ALIVE = false
-    for name, controller in pairs(Controllers) do
-        if controller.Active then
-            controller.Active = false
-            SafeCall(controller.Stop)
-        end
-    end
-    SetHeaderStatus("OFFLINE", Palette.Danger)
-    ClearHitboxes()
-    DisconnectAll()
-    DisconnectBucket("attribute-hooks")
-    ResetAttributes()
-    local camera = GetCamera()
-    if camera then
-        pcall(function()
-            camera.FieldOfView = Baseline.FieldOfView
-        end)
-    end
-    SafeDestroy(Ragnarok)
-    SafeDestroy(NotifyGui)
-    if getgenv then
-        local environment = getgenv()
-        environment.RagnarokShutdown = nil
-        environment.RagnarokVersion = RAGNAROK_VERSION
-    end
-end
-
-Track(CloseButton.MouseButton1Click:Connect(function()
-    AskConfirmation("STOP RAGNAROK HUB", "The interface, visual registry and active controllers will be shut down.", function()
-        FullShutdown("confirmed")
-    end)
-end), "ui")
-
-function UpdateTick(delta)
-    if not IsAlive() then
-        return
-    end
-    if V3RunScheduler then
-        V3RunScheduler(delta)
-    end
-    if delta and delta > 0 then
-        Runtime.FrameRate = math.clamp(1 / delta, 0, 999)
-    end
-    Runtime.LastMetricUpdate = Runtime.LastMetricUpdate + delta
-    if Runtime.LastMetricUpdate >= (Config.PerformanceMode and 1 or 0.4) then
-        Runtime.LastMetricUpdate = 0
-        UpdateDashboard()
-    end
-end
-
-Track(RunService.RenderStepped:Connect(function(delta)
-    if not IsAlive() then
-        return
-    end
-    UpdateTick(delta)
-    RefreshHitboxes(false)
-    ApplyAirMove()
-    if Config.AutoRotateEnabled then
-        SetAutoRotate(true)
-    end
-    SetCameraFov()
-end), "runtime")
-
-Track(RunService.Heartbeat:Connect(function()
-    if not IsAlive() then
-        return
-    end
-    local now = os.clock()
-    if now - Runtime.LastStatsApply >= (Config.PerformanceMode and 1.5 or 0.5) then
-        Runtime.LastStatsApply = now
-        if Config.EnableStatChangers then
-            ApplyStats()
-        end
-    end
-end), "runtime")
-
-if getgenv then
-    getgenv().RagnarokShutdown = function()
-        FullShutdown("reload")
-    end
-end
-
-startupCamera = GetCamera()
-if startupCamera then
-    Baseline.FieldOfView = startupCamera.FieldOfView
-end
-
-SetActivePage("dashboard")
-DashboardMetrics.Visible = Config.ShowMetrics
-RebuildIconVisibility()
-ReconcileConfiguration()
-UpdateDashboard()
-SetHeaderStatus("ONLINE", Palette.Success)
-UpdateFooter("RAGNAROK HUB  /  DASHBOARD  /  READY")
-Notify("Ragnarok Hub", "Version " .. RAGNAROK_VERSION .. " initialized.", "success", 2)
-
-StartupBinding = Config.ToggleUIKey
-if StartupBinding == "None" then
-    StartupBinding = "RightShift"
-end
-
-for key, control in pairs(ControlRegistry) do
-    if control.Refresh and Config[key] ~= nil then
-        SafeCall(control.Refresh, Config[key])
-    end
-end
-
-if Config.HideIcon then
-    Icon.Visible = false
-end
-
-V3Profiles = {"alpha", "beta", "gamma"}
-V3ProfileNames = {
-    alpha = "PRIMARY",
-    beta = "SECONDARY",
-    gamma = "TERTIARY",
-}
-V3StateListeners = {}
-V3Commands = {}
-V3CommandButtons = {}
-V3PaletteIndex = 1
-V3DiagnosticsText = nil
-V3EventText = nil
-V3ProfileStatus = nil
-V3ConnectionStatus = nil
-V3RevisionStatus = nil
-
-function V3CopyConfig()
-    return DeepCopy(Config)
-end
-
-function V3ValidateProfile(profile)
-    for _, value in ipairs(V3Profiles) do
-        if value == profile then
-            return true
-        end
     end
     return false
 end
-
-RecordSessionEvent = function(kind, message, payload)
-    local event = {
-        Time = os.time(),
-        Uptime = os.clock() - RAGNAROK_START,
-        Kind = tostring(kind or "system"),
-        Message = tostring(message or ""),
-        Payload = payload and DeepCopy(payload) or nil,
-        Revision = Runtime.StateRevision,
-    }
-    table.insert(Runtime.SessionHistory, event)
-    local limit = math.floor(tonumber(Config.SessionHistoryLimit) or 80)
-    while #Runtime.SessionHistory > limit do
-        table.remove(Runtime.SessionHistory, 1)
+function ApplyVisualToModel(model)
+    local reference = ResolveBallReference(model)
+    if not reference then
+        return false
     end
-    Runtime.StateRevision = Runtime.StateRevision + 1
+    local visual = model:FindFirstChild("RagnarokHitbox")
+    if not visual then
+        visual = Instance.new("Part")
+        visual.Name = "RagnarokHitbox"
+        visual.Shape = Enum.PartType.Ball
+        visual.Anchored = true
+        visual.CanCollide = false
+        visual.CanTouch = false
+        visual.CanQuery = false
+        visual.CastShadow = false
+        visual.Material = Enum.Material.ForceField
+        visual.Parent = model
+    end
+    visual.Size = Vector3.new(Config.HitboxScale, Config.HitboxScale, Config.HitboxScale)
+    visual.CFrame = reference.CFrame
+    visual.Transparency = Config.HitboxTransparency
+    visual.Color = GetVisualColor()
+    return true
 end
-
-PublishState = function(key, value, previous)
-    local listeners = V3StateListeners[key]
-    if listeners then
-        for _, listener in ipairs(listeners) do
-            SafeCall(listener, value, previous, key)
+function RefreshVisualService(force)
+    if not Config.HitboxEnabled then
+        return ClearHitboxes()
+    end
+    local now = os.clock()
+    if not force and now - RuntimeServices.LastVisualScan < Config.HitboxRefreshRate then
+        return
+    end
+    RuntimeServices.LastVisualScan = now
+    local count = 0
+    for _, model in ipairs(GetBallModels()) do
+        if ApplyVisualToModel(model) then
+            count = count + 1
         end
     end
-    local allListeners = V3StateListeners["*"]
-    if allListeners then
-        for _, listener in ipairs(allListeners) do
-            SafeCall(listener, key, value, previous)
-        end
-    end
+    SetFeatureState("hitbox", count > 0 or Config.HitboxEnabled)
+    return count
 end
-
-function V3Subscribe(key, callback)
-    if type(callback) ~= "function" then
-        return function()
-        end
+function RefreshMovementService()
+    local character = GetCharacterSafe()
+    local humanoid = GetHumanoidSafe(character)
+    local root = GetRootSafe(character)
+    if not humanoid or not root then
+        return false
     end
-    V3StateListeners[key] = V3StateListeners[key] or {}
-    table.insert(V3StateListeners[key], callback)
-    local active = true
-    return function()
-        if not active then
-            return
-        end
-        active = false
-        local listeners = V3StateListeners[key]
-        if not listeners then
-            return
-        end
-        for index, listener in ipairs(listeners) do
-            if listener == callback then
-                table.remove(listeners, index)
-                break
+    if Config.AutoRotateEnabled then
+        humanoid.AutoRotate = true
+    end
+    if Config.DirectionalJump then
+        SetFeatureState("directional", true)
+    else
+        SetFeatureState("directional", false)
+    end
+    if Config.AirMoveEnabled then
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Freefall or state == Enum.HumanoidStateType.Jumping then
+            local direction = humanoid.MoveDirection
+            if direction.Magnitude > 0 then
+                local velocity = root.AssemblyLinearVelocity
+                root.AssemblyLinearVelocity = Vector3.new(direction.X * Config.AirMoveSpeed, velocity.Y, direction.Z * Config.AirMoveSpeed)
             end
         end
-    end
-end
-
-function V3SetValue(key, value, silent)
-    if Config[key] == nil then
-        return false
-    end
-    local previous = Config[key]
-    local normalized = NormalizeValue(key, value)
-    if normalized == nil and ConfigSchema[key] then
-        return false
-    end
-    if normalized == nil then
-        normalized = value
-    end
-    Config[key] = normalized
-    UpdateControlAndRuntime(key, normalized)
-    FireControlChanged(key, normalized)
-    if PublishState then
-        PublishState(key, normalized, previous)
-    end
-    if RecordSessionEvent and not silent then
-        RecordSessionEvent("state", key .. " updated", {Value = normalized, Previous = previous})
-    end
-    if Config.SaveOnChange and not silent then
-        SaveConfig(true)
+        SetFeatureState("airmove", true)
+    else
+        SetFeatureState("airmove", false)
     end
     return true
 end
-
-function V3GetSnapshot()
-    local snapshot = {
-        Version = RAGNAROK_VERSION,
-        Build = RAGNAROK_BUILD,
-        Alive = RAGNAROK_ALIVE,
-        Profile = Config.ActiveProfile,
-        Page = Runtime.ActivePage,
-        Revision = Runtime.StateRevision,
-        Uptime = os.clock() - RAGNAROK_START,
-        FPS = GetFps(),
-        Ping = GetPlayerPing(),
-        Memory = GetMemoryUsage(),
-        ActiveControllers = CountActiveControllers(),
-        Connections = #Connections,
-        History = #Runtime.SessionHistory,
-    }
-    return snapshot
-end
-
-function V3Schedule(name, interval, callback, immediate)
-    V3Scheduler[name] = {
-        Interval = math.max(0.05, tonumber(interval) or 1),
-        Elapsed = immediate and 999999999 or 0,
-        Callback = callback,
-        Active = true,
-    }
-end
-
-function V3Unschedule(name)
-    if V3Scheduler[name] then
-        V3Scheduler[name].Active = false
-        V3Scheduler[name] = nil
-    end
-end
-
-V3RunScheduler = function(delta)
-    for name, taskData in pairs(V3Scheduler) do
-        if taskData.Active then
-            taskData.Elapsed = taskData.Elapsed + (delta or 0)
-            if taskData.Elapsed >= taskData.Interval then
-                taskData.Elapsed = 0
-                local success, errorMessage = SafeCall(taskData.Callback, delta, name)
-                if not success and RecordSessionEvent then
-                    RecordSessionEvent("error", name .. " failed", {Error = tostring(errorMessage)})
-                end
-            end
-        end
-    end
-end
-
-ApplyLayoutMode = function(mode)
-    local selected = mode or Config.LayoutMode or "standard"
-    local dimensions = {
-        compact = {760, 520},
-        standard = {900, 600},
-        wide = {1120, 700},
-    }
-    if not dimensions[selected] then
-        selected = "standard"
-    end
-    Config.LayoutMode = selected
-    local size = dimensions[selected]
-    if Shell and Shell.Parent then
-        Tween(Shell, 0.22, {Size = UDim2.new(0, size[1], 0, size[2])})
-    end
-    if RecordSessionEvent then
-        RecordSessionEvent("layout", "Layout set to " .. selected, {Mode = selected})
-    end
-end
-
-function V3SetActivePage(id)
-    SetActivePage(id)
-    if RecordSessionEvent then
-        RecordSessionEvent("navigation", "Page set to " .. tostring(id), {Page = id})
-    end
-end
-
-function V3SaveProfile(profile)
-    local selected = profile or Config.ActiveProfile or "alpha"
-    if not V3ValidateProfile(selected) then
+function RefreshCameraService()
+    local camera = GetCameraSafe()
+    if not camera then
         return false
     end
-    local success = SaveConfig(false, selected)
-    if success and RecordSessionEvent then
-        RecordSessionEvent("profile", "Profile saved", {Profile = selected})
+    camera.FieldOfView = Config.StretchedRes and Config.StretchedFOV or Config.NormalFOV
+    SetFeatureState("camera", true)
+    return true
+end
+function StopAntiAfkService()
+    Config.AntiAFK = false
+    antiAfkActive = false
+    SetFeatureState("antiafk", false)
+end
+function StartAntiAfkService()
+    if not Config.AntiAFK then
+        StopAntiAfkService()
+        return
+    end
+    SetFeatureState("antiafk", true)
+end
+function RefreshExecutorServices()
+    NormalizeExecutorConfig()
+    RefreshVisualService(false)
+    RefreshMovementService()
+    RefreshCameraService()
+    if Config.AntiAFK then
+        StartAntiAfkService()
+    else
+        StopAntiAfkService()
+    end
+end
+function RuntimeDiagnostic()
+    DetectExecutorCapabilities()
+    NormalizeExecutorConfig()
+    local snapshot = GetRuntimeSnapshot()
+    snapshot.Capabilities = {}
+    for key, value in pairs(RuntimeServices.Capability) do
+        snapshot.Capabilities[key] = value
+    end
+    snapshot.Features = GetFeatureStates()
+    snapshot.Errors = RuntimeServices.ErrorCount
+    snapshot.LogSize = #RuntimeServices.Log
+    return snapshot
+end
+function UpdateRuntimeRowsExtended()
+    if not RAGNAROK_ALIVE then
+        return
+    end
+    local snapshot = RuntimeDiagnostic()
+    if runtimeValue then runtimeValue.Text = snapshot.Version end
+    if aliveValue then aliveValue.Text = snapshot.Alive and "ACTIVE" or "STOPPED" end
+    if ballsValue then ballsValue.Text = tostring(snapshot.BallModels) end
+    if visualsValue then visualsValue.Text = tostring(snapshot.Visuals) end
+    if uptimeValue then uptimeValue.Text = string.format("%ds", math.floor(snapshot.Uptime)) end
+end
+function ScheduleExecutorMaintenance()
+    if MaintenanceTask then
+        return
+    end
+    MaintenanceTask = task.spawn(function()
+        while RAGNAROK_ALIVE do
+            task.wait(1)
+            if not RAGNAROK_ALIVE then
+                break
+            end
+            RuntimeServices.HeartbeatCount = RuntimeServices.HeartbeatCount + 1
+            RuntimeServices.LastHeartbeat = os.clock()
+            RefreshExecutorServices()
+            UpdateRuntimeRowsExtended()
+            if RuntimeServices.LastConfigSave == 0 then
+                RuntimeServices.LastConfigSave = os.clock()
+            elseif os.clock() - RuntimeServices.LastConfigSave > 20 then
+                SaveConfig()
+                RuntimeServices.LastConfigSave = os.clock()
+            end
+        end
+    end)
+end
+function CancelExecutorMaintenance()
+    MaintenanceTask = nil
+end
+function InstallRuntimeSafety()
+    DetectExecutorCapabilities()
+    NormalizeExecutorConfig()
+    AddRuntimeLog("system", "executor runtime initialized")
+    ScheduleExecutorMaintenance()
+end
+InstallRuntimeSafety()
+ExecutorProfiles = {
+    default = {
+        HitboxScale = 6,
+        HitboxEnabled = true,
+        DirectionalJump = true,
+        AirMoveEnabled = false,
+        AirMoveSpeed = 15,
+        AntiAFK = false,
+        StretchedRes = false,
+        HitboxTransparency = 0.7,
+        HitboxColor = "Cyan",
+        NormalFOV = 70,
+        StretchedFOV = 110,
+        AutoRotateEnabled = false,
+        ShowNotifications = true,
+    },
+    movement = {
+        HitboxScale = 6,
+        HitboxEnabled = true,
+        DirectionalJump = true,
+        AirMoveEnabled = true,
+        AirMoveSpeed = 35,
+        AntiAFK = true,
+        StretchedRes = false,
+        HitboxTransparency = 0.7,
+        HitboxColor = "Cyan",
+        NormalFOV = 70,
+        StretchedFOV = 110,
+        AutoRotateEnabled = true,
+        ShowNotifications = true,
+    },
+    clean = {
+        HitboxScale = 6,
+        HitboxEnabled = false,
+        DirectionalJump = false,
+        AirMoveEnabled = false,
+        AirMoveSpeed = 15,
+        AntiAFK = false,
+        StretchedRes = false,
+        HitboxTransparency = 0.7,
+        HitboxColor = "Cyan",
+        NormalFOV = 70,
+        StretchedFOV = 110,
+        AutoRotateEnabled = false,
+        ShowNotifications = true,
+    },
+}
+function SaveProfile(name)
+    local profile = ExecutorProfiles[name]
+    if not profile then
+        return false
+    end
+    for key, value in pairs(profile) do
+        Config[key] = value
+    end
+    NormalizeExecutorConfig()
+    RefreshAllControls()
+    ApplyCameraSettings()
+    ClearHitboxes()
+    SaveConfig()
+    AddRuntimeLog("profile", name .. " loaded")
+    return true
+end
+function CaptureProfile(name)
+    if not ExecutorProfiles[name] then
+        ExecutorProfiles[name] = {}
+    end
+    for key, value in pairs(Config) do
+        if type(value) ~= "table" and key ~= "ToggleKey" and key ~= "ShutdownKey" then
+            ExecutorProfiles[name][key] = value
+        end
+    end
+    AddRuntimeLog("profile", name .. " captured")
+    return true
+end
+function DeleteProfile(name)
+    if name == "default" or not ExecutorProfiles[name] then
+        return false
+    end
+    ExecutorProfiles[name] = nil
+    AddRuntimeLog("profile", name .. " deleted")
+    return true
+end
+function ListProfiles()
+    local names = {}
+    for name in pairs(ExecutorProfiles) do
+        table.insert(names, name)
+    end
+    table.sort(names)
+    return names
+end
+function ExportRuntimeSnapshot()
+    if type(writefile) ~= "function" then
+        return false
+    end
+    local payload = {
+        Version = RAGNAROK_VERSION,
+        Created = os.time(),
+        Config = GetConfigSnapshot(),
+        Runtime = RuntimeDiagnostic(),
+        Log = GetRuntimeLog(),
+    }
+    local success = pcall(function()
+        writefile("RagnarokRuntimeSnapshot.json", HttpService:JSONEncode(payload))
+    end)
+    if success then
+        AddRuntimeLog("snapshot", "runtime snapshot exported")
     end
     return success
 end
-
-function V3LoadProfile(profile)
-    local selected = profile or Config.ActiveProfile or "alpha"
-    if not V3ValidateProfile(selected) then
+function ImportRuntimeSnapshot()
+    if type(isfile) ~= "function" or type(readfile) ~= "function" or not isfile("RagnarokRuntimeSnapshot.json") then
         return false
     end
-    local previous = Config.ActiveProfile
-    ResetConfig(true)
-    local loaded = LoadConfig(true, selected)
-    Config.ActiveProfile = selected
-    UpdateAllControls()
-    ReconcileConfiguration()
-    ApplyLayoutMode(Config.LayoutMode)
-    if PublishState then
-        PublishState("ActiveProfile", selected, previous)
-    end
-    if RecordSessionEvent then
-        RecordSessionEvent("profile", "Profile loaded", {Profile = selected, Loaded = loaded})
-    end
-    return loaded
-end
-
-V3SwitchProfile = function(profile, previousProfile)
-    local selected = tostring(profile or "")
-    if not V3ValidateProfile(selected) then
+    local success, decoded = pcall(function()
+        return HttpService:JSONDecode(readfile("RagnarokRuntimeSnapshot.json"))
+    end)
+    if not success or type(decoded) ~= "table" or type(decoded.Config) ~= "table" then
         return false
     end
-    local previous = previousProfile or Config.ActiveProfile
-    if previous ~= selected then
-        V3SaveProfile(previous)
-    end
-    local loaded = V3LoadProfile(selected)
-    if not loaded then
-        Config.ActiveProfile = selected
-        SaveConfig(true, selected)
-        UpdateAllControls()
-        ReconcileConfiguration()
-        if RecordSessionEvent then
-            RecordSessionEvent("profile", "New profile initialized", {Profile = selected})
+    for key, value in pairs(decoded.Config) do
+        if Config[key] ~= nil and type(value) == type(Config[key]) then
+            Config[key] = value
         end
     end
-    if V3ProfileStatus then
-        V3ProfileStatus.Text = V3ProfileNames[selected] or selected:upper()
-    end
-    Notify("Profile", "Active profile: " .. (V3ProfileNames[selected] or selected:upper()), "success")
+    NormalizeExecutorConfig()
+    RefreshAllControls()
+    ApplyCameraSettings()
+    AddRuntimeLog("snapshot", "runtime snapshot imported")
     return true
 end
-
-function V3BuildCommandPalette()
-    local paletteOverlay = CreateInstance("Frame", {
-        Name = "CommandPaletteOverlay",
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-        BackgroundTransparency = 0.34,
-        Visible = false,
-        ZIndex = 70,
-    }, Shell)
-    local paletteCard = CreateInstance("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0),
-        Position = UDim2.new(0.5, 0, 0, 62),
-        Size = UDim2.new(0, 520, 0, 390),
-        BackgroundColor3 = Palette.SurfaceRaised,
-        BorderSizePixel = 0,
-        ZIndex = 71,
-    }, paletteOverlay)
-    AddCorner(paletteCard, 13)
-    AddStroke(paletteCard, Palette.BorderStrong, 1.2, 0.05)
-    local paletteTitle = CreateLabel(paletteCard, "COMMAND PALETTE", UDim2.new(1, -34, 0, 22), UDim2.new(0, 17, 0, 15), Palette.Text, Enum.Font.GothamBold, 13)
-    paletteTitle.ZIndex = 72
-    local paletteHint = CreateLabel(paletteCard, "Type a command or use the arrow keys.", UDim2.new(1, -34, 0, 18), UDim2.new(0, 17, 0, 39), Palette.TextDim, Enum.Font.GothamMedium, 10)
-    paletteHint.ZIndex = 72
-    local paletteInput = CreateInstance("TextBox", {
-        Size = UDim2.new(1, -34, 0, 38),
-        Position = UDim2.new(0, 17, 0, 69),
-        BackgroundColor3 = Palette.Surface,
-        BorderSizePixel = 0,
-        ClearTextOnFocus = false,
-        Font = Enum.Font.GothamMedium,
-        PlaceholderText = "Search command",
-        PlaceholderColor3 = Palette.TextDim,
-        Text = "",
-        TextColor3 = Palette.Text,
-        TextSize = 12,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 72,
-    }, paletteCard)
-    AddCorner(paletteInput, 8)
-    AddStroke(paletteInput, Palette.Border, 1, 0.25)
-    AddPadding(paletteInput, 12, 12, 0, 0)
-    local paletteList = CreateInstance("ScrollingFrame", {
-        Size = UDim2.new(1, -34, 0, 242),
-        Position = UDim2.new(0, 17, 0, 118),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = Palette.Accent,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ZIndex = 72,
-    }, paletteCard)
-    AddList(paletteList, 6, false)
-    local paletteFooter = CreateLabel(paletteCard, "ESC CLOSE  /  ENTER RUN", UDim2.new(1, -34, 0, 18), UDim2.new(0, 17, 1, -28), Palette.TextDim, Enum.Font.GothamBold, 9)
-    paletteFooter.ZIndex = 72
-
-    local function RefreshPalette(query)
-        DisconnectBucket("palette")
-        for _, child in ipairs(paletteList:GetChildren()) do
-            if child:IsA("TextButton") then
-                SafeDestroy(child)
-            end
-        end
-        V3CommandButtons = {}
-        local normalized = string.lower(tostring(query or ""))
-        local visibleIndex = 0
-        for index, command in ipairs(V3Commands) do
-            local haystack = string.lower(command.Label .. " " .. command.Detail .. " " .. command.Id)
-            if normalized == "" or string.find(haystack, normalized, 1, true) then
-                visibleIndex = visibleIndex + 1
-                local button = CreateInstance("TextButton", {
-                    Size = UDim2.new(1, 0, 0, 46),
-                    BackgroundColor3 = visibleIndex == V3PaletteIndex and Palette.AccentSoft or Palette.Surface,
-                    BorderSizePixel = 0,
-                    AutoButtonColor = false,
-                    Text = "",
-                    LayoutOrder = visibleIndex,
-                    ZIndex = 73,
-                }, paletteList)
-                AddCorner(button, 8)
-                local commandLabel = CreateLabel(button, command.Label, UDim2.new(1, -22, 0, 19), UDim2.new(0, 11, 0, 5), Palette.Text, Enum.Font.GothamBold, 11)
-                commandLabel.ZIndex = 74
-                local commandDetail = CreateLabel(button, command.Detail, UDim2.new(1, -22, 0, 17), UDim2.new(0, 11, 0, 25), Palette.TextDim, Enum.Font.GothamMedium, 9)
-                commandDetail.ZIndex = 74
-                V3CommandButtons[visibleIndex] = command
-                Track(button.MouseButton1Click:Connect(function()
-                    ExecuteV3Command(command.Id)
-                end), "palette")
-                Track(button.MouseEnter:Connect(function()
-                    V3PaletteIndex = visibleIndex
-                    RefreshPalette(paletteInput.Text)
-                end), "palette")
-            end
-        end
-        if visibleIndex == 0 then
-            local empty = CreateLabel(paletteList, "No matching command.", UDim2.new(1, 0, 0, 38), UDim2.new(0, 0, 0, 0), Palette.TextDim, Enum.Font.GothamMedium, 11)
-            empty.TextXAlignment = Enum.TextXAlignment.Center
+function RunExecutorSelfTest()
+    local checks = {}
+    checks.Services = type(game) == "userdata" or type(game) == "table"
+    checks.Players = Players ~= nil and LocalPlayer ~= nil
+    checks.Input = UIS ~= nil and type(UIS.InputBegan.Connect) == "function"
+    checks.Render = RunService ~= nil and type(RunService.RenderStepped.Connect) == "function"
+    checks.Gui = Ragnarok ~= nil and Ragnarok.Parent ~= nil
+    checks.Controls = ControlRegistry ~= nil and next(ControlRegistry) ~= nil
+    checks.Persistence = type(writefile) == "function" and type(readfile) == "function"
+    checks.Executor = type(getgenv) == "function" or type(gethui) == "function"
+    checks.Config = Config ~= nil and type(Config.HitboxScale) == "number"
+    checks.Cleanup = type(ClearHitboxes) == "function" and type(FullShutdown) == "function"
+    local passed = 0
+    local total = 0
+    for _, result in pairs(checks) do
+        total = total + 1
+        if result then
+            passed = passed + 1
         end
     end
-
-    CloseCommandPalette = function()
-        paletteOverlay.Visible = false
-        Runtime.PendingBinding = nil
-        DisconnectBucket("palette-input")
-    end
-
-    OpenCommandPalette = function()
-        if not Shell.Visible then
-            SetShellVisible(true)
-        end
-        paletteOverlay.Visible = true
-        V3PaletteIndex = 1
-        paletteInput.Text = ""
-        RefreshPalette("")
-        paletteInput:CaptureFocus()
-    end
-
-    Track(paletteInput:GetPropertyChangedSignal("Text"):Connect(function()
-        V3PaletteIndex = 1
-        RefreshPalette(paletteInput.Text)
-    end), "ui")
-    Track(paletteInput.InputBegan:Connect(function(input)
-        if input.UserInputType ~= Enum.UserInputType.Keyboard then
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.Escape then
-            CloseCommandPalette()
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.Down then
-            V3PaletteIndex = math.min(#V3CommandButtons, V3PaletteIndex + 1)
-            RefreshPalette(paletteInput.Text)
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.Up then
-            V3PaletteIndex = math.max(1, V3PaletteIndex - 1)
-            RefreshPalette(paletteInput.Text)
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.Return and V3CommandButtons[V3PaletteIndex] then
-            ExecuteV3Command(V3CommandButtons[V3PaletteIndex].Id)
-        end
-    end), "ui")
-
-    return paletteOverlay
+    checks.Passed = passed
+    checks.Total = total
+    checks.Success = passed == total
+    AddRuntimeLog(checks.Success and "selftest" or "warning", string.format("self test %d/%d", passed, total))
+    return checks
 end
-
-ExecuteV3Command = function(commandId)
-    local command
-    for _, candidate in ipairs(V3Commands) do
-        if candidate.Id == commandId then
-            command = candidate
-            break
-        end
+function GetCapabilitySummary()
+    local summary = {}
+    for name, available in pairs(RuntimeServices.Capability) do
+        summary[name] = available and "READY" or "MISSING"
     end
-    if CloseCommandPalette then
-        CloseCommandPalette()
-    end
-    if command and command.Action then
-        SafeCall(command.Action)
-        if RecordSessionEvent then
-            RecordSessionEvent("command", command.Id)
-        end
-    end
+    return summary
 end
-
-V3Commands = {
-    {Id = "dashboard", Label = "Open dashboard", Detail = "Navigate to runtime overview.", Action = function() V3SetActivePage("dashboard") end},
-    {Id = "gameplay", Label = "Open gameplay", Detail = "Navigate to core control settings.", Action = function() V3SetActivePage("gameplay") end},
-    {Id = "movement", Label = "Open movement", Detail = "Navigate to movement controls.", Action = function() V3SetActivePage("movement") end},
-    {Id = "visuals", Label = "Open visuals", Detail = "Navigate to visual pipeline.", Action = function() V3SetActivePage("visuals") end},
-    {Id = "experimental", Label = "Open experimental", Detail = "Navigate to advanced multipliers.", Action = function() V3SetActivePage("experimental") end},
-    {Id = "utilities", Label = "Open utilities", Detail = "Navigate to maintenance tools.", Action = function() V3SetActivePage("utilities") end},
-    {Id = "settings", Label = "Open settings", Detail = "Navigate to interface preferences.", Action = function() V3SetActivePage("settings") end},
-    {Id = "save", Label = "Save active profile", Detail = "Persist the current v3 profile.", Action = function() V3SaveProfile(Config.ActiveProfile) end},
-    {Id = "reload", Label = "Reload active profile", Detail = "Restore the saved profile from disk.", Action = function() V3LoadProfile(Config.ActiveProfile) end},
-    {Id = "refresh", Label = "Refresh runtime", Detail = "Reconcile controllers, visuals and camera.", Action = function() ReconcileConfiguration() end},
-    {Id = "reset", Label = "Reset active profile", Detail = "Replace the current values with the baseline.", Action = function() local profile = Config.ActiveProfile ResetConfig(false) Config.ActiveProfile = profile UpdateAllControls() ReconcileConfiguration() end},
-    {Id = "compact", Label = "Set compact layout", Detail = "Resize the shell to compact mode.", Action = function() V3SetValue("LayoutMode", "compact") ApplyLayoutMode("compact") end},
-    {Id = "standard", Label = "Set standard layout", Detail = "Resize the shell to standard mode.", Action = function() V3SetValue("LayoutMode", "standard") ApplyLayoutMode("standard") end},
-    {Id = "wide", Label = "Set wide layout", Detail = "Resize the shell to wide mode.", Action = function() V3SetValue("LayoutMode", "wide") ApplyLayoutMode("wide") end},
-    {Id = "profile-alpha", Label = "Switch to primary profile", Detail = "Load the alpha profile.", Action = function() V3SwitchProfile("alpha") end},
-    {Id = "profile-beta", Label = "Switch to secondary profile", Detail = "Load the beta profile.", Action = function() V3SwitchProfile("beta") end},
-    {Id = "profile-gamma", Label = "Switch to tertiary profile", Detail = "Load the gamma profile.", Action = function() V3SwitchProfile("gamma") end},
-    {Id = "shutdown", Label = "Stop Ragnarok Hub", Detail = "Close the active runtime safely.", Action = function() AskConfirmation("STOP RAGNAROK HUB", "The v3 runtime will shut down safely.", function() FullShutdown("command") end) end},
-}
-
-V3PaletteOverlay = V3BuildCommandPalette()
-
-function V3CountEntries(value)
-    local count = 0
-    for _ in pairs(value or {}) do
-        count = count + 1
-    end
-    return count
+function FormatRuntimeLine(label, value)
+    return string.format("%-18s %s", tostring(label), tostring(value))
 end
-
-function V3FormatHistory()
-    local lines = {}
-    local total = #Runtime.SessionHistory
-    local start = math.max(1, total - 7)
-    for index = total, start, -1 do
-        local event = Runtime.SessionHistory[index]
-        table.insert(lines, string.format("[%s] %s  %s", event.Kind:upper(), event.Message, FormatNumber(event.Uptime, 1) .. "s"))
-    end
-    if #lines == 0 then
-        return "NO SESSION EVENTS"
+function FormatRuntimeReport()
+    local snapshot = RuntimeDiagnostic()
+    local lines = {
+        FormatRuntimeLine("VERSION", snapshot.Version),
+        FormatRuntimeLine("STATUS", snapshot.Alive and "ACTIVE" or "STOPPED"),
+        FormatRuntimeLine("UPTIME", math.floor(snapshot.Uptime) .. "s"),
+        FormatRuntimeLine("BALL MODELS", snapshot.BallModels),
+        FormatRuntimeLine("VISUALS", snapshot.Visuals),
+        FormatRuntimeLine("ERRORS", snapshot.Errors),
+        FormatRuntimeLine("LOG SIZE", snapshot.LogSize),
+    }
+    for name, state in pairs(snapshot.Features or {}) do
+        table.insert(lines, FormatRuntimeLine(name:upper(), state and "ON" or "OFF"))
     end
     return table.concat(lines, "\n")
 end
-
-function V3UpdateDiagnostics()
-    local snapshot = V3GetSnapshot()
-    if V3DiagnosticsText then
-        V3DiagnosticsText.Text = string.format(
-            "VERSION      %s\nBUILD        %s\nPROFILE      %s\nPAGE         %s\nREVISION     %d\nCONTROLLERS  %d\nCONNECTIONS  %d\nHITBOXES     %d\nFPS          %d\nPING         %d ms\nMEMORY       %d MB",
-            snapshot.Version,
-            snapshot.Build,
-            tostring(snapshot.Profile):upper(),
-            tostring(snapshot.Page):upper(),
-            snapshot.Revision,
-            snapshot.ActiveControllers,
-            snapshot.Connections,
-            V3CountEntries(HitboxRegistry),
-            snapshot.FPS,
-            snapshot.Ping,
-            snapshot.Memory
-        )
+function ShowRuntimeReport()
+    local report = FormatRuntimeReport()
+    if setclipboard then
+        pcall(function()
+            setclipboard(report)
+        end)
     end
-    if V3EventText then
-        V3EventText.Text = V3FormatHistory()
+    AddRuntimeLog("report", "runtime report generated")
+    return report
+end
+function RefreshCompatibilityRows()
+    local summary = GetCapabilitySummary()
+    if not ConfigPage then
+        return
     end
-    if V3ConnectionStatus then
-        V3ConnectionStatus.Text = tostring(snapshot.Connections) .. " TRACKED"
-    end
-    if V3RevisionStatus then
-        V3RevisionStatus.Text = "REV " .. tostring(snapshot.Revision)
+    for _, child in ipairs(ConfigPage:GetChildren()) do
+        if child:IsA("Frame") then
+            local text = child:FindFirstChildOfClass("TextLabel")
+            if text and summary[text.Text] then
+                text.Text = text.Text
+            end
+        end
     end
 end
-
-UpdateV3Diagnostics = V3UpdateDiagnostics
-
-V3ProfileCard = CreateCard(UtilitiesPage, 250, 6)
-CreateLabel(V3ProfileCard, "PROFILE MATRIX", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(V3ProfileCard, "Three isolated profiles with independent v3 files.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-V3ProfileBody = CreatePanelBody(V3ProfileCard, 62, 12)
-CreateSelect(V3ProfileBody, "Active profile", "Switch between primary, secondary and tertiary profiles.", "ActiveProfile", V3Profiles, function(value)
-    V3SwitchProfile(value)
-end, 1)
-CreateAction(V3ProfileBody, "Save active profile", "Write the current profile without switching.", "SAVE", function()
-    if V3SaveProfile(Config.ActiveProfile) then
-        Notify("Profile", "Saved " .. Config.ActiveProfile:upper() .. ".", "success")
+function CreateLogPanel(parent, order)
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(1, -30, 0, 160)
+    panel.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
+    panel.LayoutOrder = order or 1
+    panel.Parent = parent
+    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 24)
+    title.Position = UDim2.new(0, 10, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "RUNTIME LOG"
+    title.TextColor3 = Color3.fromRGB(0, 191, 255)
+    title.TextSize = 11
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = panel
+    local body = Instance.new("TextLabel")
+    body.Size = UDim2.new(1, -20, 1, -42)
+    body.Position = UDim2.new(0, 10, 0, 34)
+    body.BackgroundTransparency = 1
+    body.Font = Enum.Font.Code
+    body.Text = "NO EVENTS"
+    body.TextColor3 = Color3.fromRGB(160, 160, 170)
+    body.TextSize = 10
+    body.TextWrapped = true
+    body.TextXAlignment = Enum.TextXAlignment.Left
+    body.TextYAlignment = Enum.TextYAlignment.Top
+    body.Parent = panel
+    return panel, body
+end
+LogPanel, LogBody = CreateLogPanel(AdvancedPage, 11)
+function RefreshLogPanel()
+    if not LogBody then
+        return
+    end
+    local lines = {}
+    local start = math.max(1, #RuntimeServices.Log - 7)
+    for index = #RuntimeServices.Log, start, -1 do
+        local entry = RuntimeServices.Log[index]
+        table.insert(lines, string.format("[%s] %s", entry.Kind:upper(), entry.Message))
+    end
+    LogBody.Text = #lines > 0 and table.concat(lines, "\n") or "NO EVENTS"
+end
+CreateActionButton(AdvancedPage, "RUN EXECUTOR SELF TEST", Color3.fromRGB(0, 191, 255), function()
+    local result = RunExecutorSelfTest()
+    Notify("Self test", result.Success)
+    RefreshLogPanel()
+end, 12)
+CreateActionButton(AdvancedPage, "EXPORT RUNTIME SNAPSHOT", Color3.fromRGB(0, 191, 255), function()
+    Notify("Snapshot", ExportRuntimeSnapshot())
+    RefreshLogPanel()
+end, 13)
+CreateActionButton(AdvancedPage, "COPY RUNTIME REPORT", Color3.fromRGB(200, 200, 210), function()
+    ShowRuntimeReport()
+    Notify("Report", true)
+    RefreshLogPanel()
+end, 14)
+CreateActionButton(ConfigPage, "CAPTURE MOVEMENT PROFILE", Color3.fromRGB(0, 191, 255), function()
+    CaptureProfile("movement")
+    Notify("Profile", true)
+end, 13)
+CreateActionButton(ConfigPage, "LOAD MOVEMENT PROFILE", Color3.fromRGB(0, 191, 255), function()
+    SaveProfile("movement")
+    Notify("Profile", true)
+end, 14)
+CreateActionButton(ConfigPage, "LOAD CLEAN PROFILE", Color3.fromRGB(200, 200, 210), function()
+    SaveProfile("clean")
+    Notify("Profile", true)
+end, 15)
+function RefreshExtendedServices()
+    if not RAGNAROK_ALIVE then
+        return
+    end
+    RuntimeServices.RenderCount = RuntimeServices.RenderCount + 1
+    RefreshVisualService(false)
+    RefreshMovementService()
+    RefreshCameraService()
+    RefreshRuntimeRows()
+    RefreshLogPanel()
+end
+function ProtectExecutorGui(instance)
+    if not instance then
+        return false
+    end
+    if type(gethui) == "function" then
+        local success = pcall(function()
+            instance.Parent = gethui()
+        end)
+        if success then
+            return true
+        end
+    end
+    if syn and type(syn.protect_gui) == "function" then
+        pcall(function()
+            syn.protect_gui(instance)
+        end)
+    end
+    local success = pcall(function()
+        instance.Parent = CoreGui
+    end)
+    return success
+end
+function EnsureExecutorGuiParent()
+    if Ragnarok and Ragnarok.Parent then
+        return true
+    end
+    return ProtectExecutorGui(Ragnarok)
+end
+function ReopenExecutorInterface()
+    if not RAGNAROK_ALIVE then
+        return false
+    end
+    EnsureExecutorGuiParent()
+    Main.Visible = true
+    Icon.Visible = false
+    return true
+end
+function MinimizeExecutorInterface()
+    if not RAGNAROK_ALIVE then
+        return false
+    end
+    Main.Visible = false
+    Icon.Visible = true
+    return true
+end
+function RefreshInterfaceState()
+    if not RAGNAROK_ALIVE then
+        return
+    end
+    if Main.Visible then
+        Icon.Visible = false
     else
-        Notify("Profile", "Profile could not be written.", "warning")
+        Icon.Visible = true
     end
-end, 2)
-CreateAction(V3ProfileBody, "Initialize current profile", "Reset the active profile to the v3 baseline.", "INIT", function()
-    ResetConfig(false)
-    Config.ActiveProfile = Config.ActiveProfile or "alpha"
-    UpdateAllControls()
-    ReconcileConfiguration()
-    Notify("Profile", "Active profile initialized.", "success")
-end, 3, Palette.BorderStrong)
-
-V3DiagnosticsCard = CreateCard(UtilitiesPage, 360, 7)
-CreateLabel(V3DiagnosticsCard, "RUNTIME INSPECTOR", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(V3DiagnosticsCard, "Revisioned state, tracked connections and bounded session history.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-V3DiagnosticsBody = CreatePanelBody(V3DiagnosticsCard, 62, 12)
-V3DiagnosticsSplit = CreateInstance("Frame", {
-    Size = UDim2.new(1, 0, 0, 190),
-    BackgroundTransparency = 1,
-    LayoutOrder = 1,
-}, V3DiagnosticsBody)
-V3DiagnosticsPanel = CreateInstance("Frame", {
-    Size = UDim2.new(0.52, -5, 1, 0),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-}, V3DiagnosticsSplit)
-AddCorner(V3DiagnosticsPanel, 8)
-V3EventsPanel = CreateInstance("Frame", {
-    Size = UDim2.new(0.48, -5, 1, 0),
-    Position = UDim2.new(0.52, 10, 0, 0),
-    BackgroundColor3 = Palette.SurfaceRaised,
-    BorderSizePixel = 0,
-}, V3DiagnosticsSplit)
-AddCorner(V3EventsPanel, 8)
-CreateLabel(V3DiagnosticsPanel, "STATE", UDim2.new(1, -20, 0, 18), UDim2.new(0, 10, 0, 9), Palette.Accent, Enum.Font.GothamBold, 9)
-V3DiagnosticsText = CreateLabel(V3DiagnosticsPanel, "WAITING", UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), Palette.TextMuted, Enum.Font.Code, 10)
-V3DiagnosticsText.TextYAlignment = Enum.TextYAlignment.Top
-V3DiagnosticsText.TextWrapped = false
-CreateLabel(V3EventsPanel, "EVENT LEDGER", UDim2.new(1, -20, 0, 18), UDim2.new(0, 10, 0, 9), Palette.Accent, Enum.Font.GothamBold, 9)
-V3EventText = CreateLabel(V3EventsPanel, "NO SESSION EVENTS", UDim2.new(1, -20, 1, -34), UDim2.new(0, 10, 0, 30), Palette.TextMuted, Enum.Font.Code, 10)
-V3EventText.TextYAlignment = Enum.TextYAlignment.Top
-V3EventText.TextWrapped = true
-CreateAction(V3DiagnosticsBody, "Refresh inspector", "Update state and ledger immediately.", "INSPECT", function()
-    V3UpdateDiagnostics()
-end, 2)
-V3ConnectionStatus = CreateLabel(V3DiagnosticsBody, "0 TRACKED", UDim2.new(0.5, -4, 0, 16), UDim2.new(0, 0, 0, 0), Palette.TextDim, Enum.Font.GothamBold, 9, 3)
-V3RevisionStatus = CreateLabel(V3DiagnosticsBody, "REV 0", UDim2.new(0.5, -4, 0, 16), UDim2.new(0.5, 4, 0, 0), Palette.TextDim, Enum.Font.GothamBold, 9, 4)
-
-V3LayoutCard = CreateCard(SettingsPage, 246, 6)
-CreateLabel(V3LayoutCard, "V3 PRESENTATION", UDim2.new(1, -28, 0, 22), UDim2.new(0, 14, 0, 14), Palette.Text, Enum.Font.GothamBold, 13)
-CreateLabel(V3LayoutCard, "Shell dimensions and command access.", UDim2.new(1, -28, 0, 16), UDim2.new(0, 14, 0, 36), Palette.TextDim, Enum.Font.GothamMedium, 10)
-V3LayoutBody = CreatePanelBody(V3LayoutCard, 62, 12)
-CreateSelect(V3LayoutBody, "Layout mode", "Resize the shell for compact, standard or wide workspaces.", "LayoutMode", {"compact", "standard", "wide"}, function(value)
-    ApplyLayoutMode(value)
-end, 1)
-CreateKeybind(V3LayoutBody, "Command palette", "Open direct actions without navigating the sidebar.", "CommandPaletteKey", function()
-end, 2)
-CreateSlider(V3LayoutBody, "Autosave interval", "Seconds between silent profile saves.", "AutoSaveInterval", 5, 300, 1, function()
-    if V3Scheduler.autosave then
-        V3Scheduler.autosave.Interval = Config.AutoSaveInterval
-    end
-end, 3)
-
-V3ProfileStatus = RuntimeProfile
-
-function V3UpdateProfileLabels()
-    if V3ProfileStatus then
-        V3ProfileStatus.Text = V3ProfileNames[Config.ActiveProfile] or tostring(Config.ActiveProfile):upper()
-    end
-    if Runtime.FooterLabel then
-        Runtime.FooterLabel.Text = "RAGNAROK HUB  /  " .. tostring(Config.ActiveProfile):upper() .. "  /  " .. tostring(Runtime.ActivePage):upper()
+    if Config.HideIcon then
+        Icon.Visible = false
     end
 end
-
-function V3Reconcile()
-    ApplyLayoutMode(Config.LayoutMode)
-    ReconcileConfiguration()
-    V3UpdateProfileLabels()
-    V3UpdateDiagnostics()
+function CheckExecutorState()
+    local ready = RAGNAROK_ALIVE and Ragnarok and Ragnarok.Parent and Main and Main.Parent
+    SetFeatureState("ui", ready == true)
+    SetFeatureState("runtime", RAGNAROK_ALIVE == true)
+    return ready == true
 end
-
-V3Subscribe("ActiveProfile", function()
-    V3UpdateProfileLabels()
-end)
-V3Subscribe("LayoutMode", function(value)
-    ApplyLayoutMode(value)
-end)
-V3Schedule("diagnostics", Config.PerformanceMode and 1.5 or 0.6, function()
-    V3UpdateDiagnostics()
-end)
-V3Schedule("autosave", Config.AutoSaveInterval, function()
-    SaveConfig(true)
-end)
-
-CreateLabel(SettingsAbout, "V3 profile matrix, command palette and runtime inspector enabled.", UDim2.new(1, -28, 0, 18), UDim2.new(0, 14, 0, 98), Palette.TextDim, Enum.Font.GothamMedium, 10)
-RecordSessionEvent("system", "Ragnarok Hub v3 runtime attached")
-V3Reconcile()
-
-PublicAPI = {
-    Version = RAGNAROK_VERSION,
-    Build = RAGNAROK_BUILD,
-    Config = Config,
-    Notify = Notify,
-    SaveConfig = SaveConfig,
-    LoadConfig = LoadConfig,
-    ResetConfig = ResetConfig,
-    Refresh = ReconcileConfiguration,
-    Reconcile = V3Reconcile,
-    Shutdown = FullShutdown,
-    Toggle = ToggleShell,
-    SetPage = V3SetActivePage,
-    SetValue = V3SetValue,
-    GetState = V3GetSnapshot,
-    Subscribe = V3Subscribe,
-    SaveProfile = V3SaveProfile,
-    LoadProfile = V3LoadProfile,
-    SwitchProfile = V3SwitchProfile,
-    Execute = ExecuteV3Command,
-    Inspect = V3UpdateDiagnostics,
-    GetHistory = function()
-        return DeepCopy(Runtime.SessionHistory)
-    end,
-    GetConfig = V3CopyConfig,
-}
-
-if getgenv then
-    getgenv().RagnarokAPI = PublicAPI
+InstallExecutorRuntime()
+RefreshExtendedServices()
+AddRuntimeLog("system", "v1 compact interface restored")
+RefreshLogPanel()
+function GetExecutorEnvironment()
+    local capabilities = DetectExecutorCapabilities()
+    local result = {}
+    for key, value in pairs(capabilities) do
+        result[key] = value
+    end
+    result.Version = RAGNAROK_VERSION
+    result.Alive = RAGNAROK_ALIVE
+    result.GuiParented = Ragnarok and Ragnarok.Parent ~= nil or false
+    result.MainVisible = Main and Main.Visible or false
+    result.ConnectionCount = 0
+    for _ in pairs(RuntimeServices.Connections) do
+        result.ConnectionCount = result.ConnectionCount + 1
+    end
+    return result
 end
+function SetNotificationState(enabled)
+    Config.ShowNotifications = enabled == true
+    if not Config.ShowNotifications then
+        notifyQueue = {}
+    end
+    SaveConfig()
+    return Config.ShowNotifications
+end
+function SetInterfaceVisibility(visible)
+    if visible then
+        return ReopenExecutorInterface()
+    end
+    return MinimizeExecutorInterface()
+end
+function IsRuntimeReady()
+    return CheckExecutorState()
+end
+function ShutdownAndRestore()
+    FullShutdown("api")
+    return true
+end
+function BuildExecutorAPI()
+    return {
+        Version = RAGNAROK_VERSION,
+        Config = Config,
+        Toggle = ToggleMain,
+        Show = function() return SetInterfaceVisibility(true) end,
+        Hide = function() return SetInterfaceVisibility(false) end,
+        SetPage = SetPage,
+        SetValue = SetConfigValue,
+        GetConfig = GetConfigSnapshot,
+        GetState = GetRuntimeSnapshot,
+        GetRuntime = RuntimeDiagnostic,
+        GetEnvironment = GetExecutorEnvironment,
+        GetLogs = GetRuntimeLog,
+        ClearLogs = ClearRuntimeLog,
+        SelfTest = RunExecutorSelfTest,
+        Save = SaveConfig,
+        Load = function()
+            local result = LoadConfig()
+            RefreshAllControls()
+            return result
+        end,
+        Reset = RestoreDefaults,
+        Export = ExportRuntimeSnapshot,
+        Import = ImportRuntimeSnapshot,
+        SaveProfile = SaveProfile,
+        LoadProfile = SaveProfile,
+        CaptureProfile = CaptureProfile,
+        ListProfiles = ListProfiles,
+        Notify = Notify,
+        Shutdown = ShutdownAndRestore,
+        Ready = IsRuntimeReady,
+    }
+end
+function InstallFinalAPI()
+    local api = BuildExecutorAPI()
+    if type(getgenv) == "function" then
+        getgenv().RagnarokAPI = api
+        getgenv().RagnarokShutdown = FullShutdown
+    end
+    return api
+end
+function FinalExecutorRefresh()
+    if not RAGNAROK_ALIVE then
+        return false
+    end
+    NormalizeExecutorConfig()
+    RefreshAllControls()
+    RefreshExecutorServices()
+    RefreshExtendedServices()
+    RefreshInterfaceState()
+    return true
+end
+FinalExecutorRefresh()
+FinalAPI = InstallFinalAPI()
